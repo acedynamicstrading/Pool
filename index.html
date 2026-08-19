@@ -12,7 +12,13 @@
     padding-top: 16px; pointer-events: none; font-family: sans-serif; color: white;
     text-shadow: 0 1px 3px rgba(0,0,0,0.8); z-index: 10;
   }
-  #hint { font-size: 14px; opacity: 0.85; }
+  #hint { font-size: 14px; opacity: 0.85; text-align: center; padding: 0 16px; }
+  #cueModeUI { display: none; flex-direction: column; align-items: center; margin-top: 10px; }
+  #power-bar-track {
+    width: 160px; height: 10px; background: rgba(255,255,255,0.25);
+    border-radius: 6px; overflow: hidden; margin-top: 4px;
+  }
+  #power-bar-fill { width: 0%; height: 100%; background: #ffdd55; }
   #start-btn {
     position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
     padding: 14px 28px; font-size: 16px; border-radius: 999px; border: none;
@@ -28,6 +34,9 @@
 
 <div id="overlay">
   <div id="hint">Point your camera at the floor, tap "Start AR", then tap a flat surface to place the table.</div>
+  <div id="cueModeUI">
+    <div id="power-bar-track"><div id="power-bar-fill"></div></div>
+  </div>
 </div>
 <button id="start-btn">Start AR</button>
 <div id="unsupported">
@@ -51,12 +60,55 @@
 import * as THREE from 'three';
 import { ARButton } from 'three/addons/webxr/ARButton.js';
 
+// ============================================================================
+// Globals
+// ============================================================================
 let camera, scene, renderer;
 let reticle;                 // shows where the table WOULD be placed
 let hitTestSource = null;
 let hitTestSourceRequested = false;
 let tablePlaced = false;
-let tableGroup = null;
+let tableInfo = null;        // { group, playW, playL, feltY, pocketPositions, pocketRadius, cueBallMesh }
+
+let aimLine;                 // visual cue-direction indicator, shown only in Cue Mode
+
+// --- Game state machine ---
+// FREE_LOOK: walking around, looking at the table.
+// CUE_MODE:  phone tilted down near the table; device motion is read as aim/stroke input.
+// SHOT:      a stroke was committed; input locked until all balls settle.
+let appState = 'FREE_LOOK';
+
+// --- Cue mode thresholds (tune on-device — accelerometer/pose noise varies by phone) ---
+const ENTER_CUE_ANGLE = 55;   // degrees tilted down from horizontal to ENTER cue mode
+const EXIT_CUE_ANGLE = 40;    // must rise back above this to EXIT (hysteresis avoids flicker)
+const MAX_TABLE_DIST = 3.5;   // meters; cue mode only arms near a placed table
+
+// --- Stroke detection thresholds (all in m/s, derived from AR camera pose deltas) ---
+const BACKSWING_THRESHOLD = -0.15;
+const STROKE_THRESHOLD = 0.35;
+const DECEL_THRESHOLD = 0.12;
+const ARM_WINDOW_SECONDS = 1.2;
+const MAX_EXPECTED_SPEED = 1.2;   // peak forward speed that maps to full power (1.0)
+const MAX_BALL_SPEED = 3.2;       // world-space ball speed at full power
+
+// --- Ball physics constants ---
+const BALL_RADIUS = 0.028;
+const FRICTION_DECEL = 1.1;       // m/s^2 deceleration from felt friction
+const CUSHION_RESTITUTION = 0.72;
+
+// --- Stroke detector runtime state ---
+let strokeArmState = 'IDLE';      // IDLE | BACKSWING | STROKE
+let strokeArmTimer = 0;
+let peakForwardSpeed = 0;
+let prevCamPos = new THREE.Vector3();
+let camVelocity = new THREE.Vector3();
+let prevCamPosInit = false;
+let lastTimestamp = 0;
+
+let balls = [];       // physics balls: { mesh, pos: Vector3(x,_,z) local to table, vel: Vector3, active }
+let cueBallRef = null;
+
+let cueModeUIEl, powerFillEl, hintEl;
 
 init();
 
@@ -74,6 +126,10 @@ function init() {
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.xr.enabled = true;
   document.body.appendChild(renderer.domElement);
+
+  hintEl = document.getElementById('hint');
+  cueModeUIEl = document.getElementById('cueModeUI');
+  powerFillEl = document.getElementById('power-bar-fill');
 
   // --- AR session button ---
   const startBtn = document.getElementById('start-btn');
@@ -94,7 +150,6 @@ function init() {
     optionalFeatures: ['dom-overlay'],
     domOverlay: { root: document.getElementById('overlay') }
   });
-  // Reuse our own styled button but trigger the real ARButton logic.
   startBtn.addEventListener('click', () => arButton.click());
   arButton.style.display = 'none';
   document.body.appendChild(arButton);
@@ -106,6 +161,13 @@ function init() {
   reticle.matrixAutoUpdate = false;
   reticle.visible = false;
   scene.add(reticle);
+
+  // --- Aim line: shown only while in Cue Mode ---
+  const aimGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+  const aimMat = new THREE.LineBasicMaterial({ color: 0xffdd55 });
+  aimLine = new THREE.Line(aimGeo, aimMat);
+  aimLine.visible = false;
+  scene.add(aimLine);
 
   // Tap-to-place
   const controller = renderer.xr.getController(0);
@@ -119,34 +181,310 @@ function init() {
 function onSelect() {
   if (!reticle.visible || tablePlaced) return;
 
-  tableGroup = buildPlaceholderTable();
-  reticle.matrix.decompose(tableGroup.position, tableGroup.quaternion, tableGroup.scale);
-  scene.add(tableGroup);
+  tableInfo = buildPoolTable();
+  reticle.matrix.decompose(tableInfo.group.position, tableInfo.group.quaternion, tableInfo.group.scale);
+  scene.add(tableInfo.group);
+
+  // Register the cue ball as a physics body, tracked in the table's local space
+  // (so it moves correctly regardless of the table's placed position/rotation).
+  cueBallRef = {
+    mesh: tableInfo.cueBallMesh,
+    pos: new THREE.Vector3(tableInfo.cueBallMesh.position.x, 0, tableInfo.cueBallMesh.position.z),
+    vel: new THREE.Vector3(),
+    active: true
+  };
+  balls = [cueBallRef];
+
   tablePlaced = true;
   reticle.visible = false;
-
-  document.getElementById('hint').textContent = 'Table placed. (Next step: cue mode + physics.)';
+  hintEl.textContent = 'Tilt the phone down toward the table to aim.';
 }
 
-// Placeholder geometry so you can SEE something placed — swap for a real table model later.
-function buildPlaceholderTable() {
+// ============================================================================
+// Table construction
+// ============================================================================
+const MAT_FELT    = new THREE.MeshStandardMaterial({ color: 0x0b6623, roughness: 0.95 });
+const MAT_WOOD     = new THREE.MeshStandardMaterial({ color: 0x3b2417, roughness: 0.6 });
+const MAT_CUSHION  = new THREE.MeshStandardMaterial({ color: 0x0a5a1f, roughness: 0.8 });
+const MAT_POCKET   = new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 0.9 });
+const MAT_LINE     = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 });
+const MAT_CUEBALL  = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 });
+
+/**
+ * Builds a regulation-proportioned pool table: wood rail frame, 6 pockets
+ * (4 corner + 2 side), felt bed, 6 cushion segments (gapped at each pocket),
+ * head-string/foot-spot markings, and a cue ball. Returns the group plus the
+ * play-area metadata physics needs (dimensions, pocket positions, ball ref).
+ */
+function buildPoolTable() {
   const group = new THREE.Group();
 
-  const tableGeo = new THREE.BoxGeometry(1.42, 0.08, 2.84); // regulation-ish, meters
-  const tableMat = new THREE.MeshStandardMaterial({ color: 0x0b6623 });
-  const tableMesh = new THREE.Mesh(tableGeo, tableMat);
-  tableMesh.position.y = 0.04;
-  group.add(tableMesh);
+  // --- Core dimensions (meters) ---
+  const tableW = 1.42, tableL = 2.84;
+  const railWidth = 0.12;
+  const railHeight = 0.06;
+  const baseThickness = 0.04;
+  const playW = tableW - railWidth * 2;
+  const playL = tableL - railWidth * 2;
+  const pocketRadius = 0.055;
+  const cushionHeight = 0.025;
+  const cushionDepth = 0.035;
+  const cornerGap = pocketRadius * 2.3;
+  const sideGap = pocketRadius * 2.3;
 
-  const ballGeo = new THREE.SphereGeometry(0.028, 24, 24);
-  const ballMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
-  const cueBall = new THREE.Mesh(ballGeo, ballMat);
-  cueBall.position.set(0, 0.09, 0.7);
-  group.add(cueBall);
+  const feltY = baseThickness;
+  const cushionY = feltY + cushionHeight / 2;
+  const railY = baseThickness + railHeight / 2;
 
-  return group;
+  const base = new THREE.Mesh(new THREE.BoxGeometry(tableW, baseThickness, tableL), MAT_WOOD);
+  base.position.y = baseThickness / 2;
+  group.add(base);
+
+  const felt = new THREE.Mesh(new THREE.BoxGeometry(playW, 0.004, playL), MAT_FELT);
+  felt.position.y = feltY;
+  group.add(felt);
+
+  const topRail = new THREE.Mesh(new THREE.BoxGeometry(tableW, railHeight, railWidth), MAT_WOOD);
+  topRail.position.set(0, railY, playL / 2 + railWidth / 2);
+  group.add(topRail);
+
+  const botRail = topRail.clone();
+  botRail.position.z = -(playL / 2 + railWidth / 2);
+  group.add(botRail);
+
+  const sideRailGeo = new THREE.BoxGeometry(railWidth, railHeight, playL);
+  const leftRail = new THREE.Mesh(sideRailGeo, MAT_WOOD);
+  leftRail.position.set(-(playW / 2 + railWidth / 2), railY, 0);
+  group.add(leftRail);
+
+  const rightRail = leftRail.clone();
+  rightRail.position.x = playW / 2 + railWidth / 2;
+  group.add(rightRail);
+
+  const pocketGeo = new THREE.CylinderGeometry(pocketRadius, pocketRadius, 0.01, 24);
+  const pocketPositions = [
+    [-playW / 2, playL / 2], [playW / 2, playL / 2],
+    [-playW / 2, -playL / 2], [playW / 2, -playL / 2],
+    [-playW / 2, 0], [playW / 2, 0]
+  ];
+  for (const [px, pz] of pocketPositions) {
+    const pocket = new THREE.Mesh(pocketGeo, MAT_POCKET);
+    pocket.position.set(px, feltY + 0.001, pz);
+    group.add(pocket);
+  }
+
+  const shortSegLen = playW - 2 * cornerGap;
+  const shortCushionGeo = new THREE.BoxGeometry(shortSegLen, cushionHeight, cushionDepth);
+
+  const topCushion = new THREE.Mesh(shortCushionGeo, MAT_CUSHION);
+  topCushion.position.set(0, cushionY, playL / 2 - cushionDepth / 2);
+  group.add(topCushion);
+
+  const botCushion = new THREE.Mesh(shortCushionGeo, MAT_CUSHION);
+  botCushion.position.set(0, cushionY, -(playL / 2 - cushionDepth / 2));
+  group.add(botCushion);
+
+  const longSegLen = (playL - 2 * cornerGap - sideGap) / 2;
+  const longCushionGeo = new THREE.BoxGeometry(cushionDepth, cushionHeight, longSegLen);
+  const longSegCenterOffset = sideGap / 2 + longSegLen / 2;
+
+  for (const xSide of [-1, 1]) {
+    for (const zSide of [-1, 1]) {
+      const cushion = new THREE.Mesh(longCushionGeo, MAT_CUSHION);
+      cushion.position.set(xSide * (playW / 2 - cushionDepth / 2), cushionY, zSide * longSegCenterOffset);
+      group.add(cushion);
+    }
+  }
+
+  const headString = new THREE.Mesh(new THREE.PlaneGeometry(playW, 0.004).rotateX(-Math.PI / 2), MAT_LINE);
+  headString.position.set(0, feltY + 0.003, playL / 4);
+  group.add(headString);
+
+  const footSpot = new THREE.Mesh(new THREE.CircleGeometry(0.006, 16).rotateX(-Math.PI / 2), MAT_LINE);
+  footSpot.position.set(0, feltY + 0.003, -playL / 4);
+  group.add(footSpot);
+
+  const cueBallMesh = new THREE.Mesh(new THREE.SphereGeometry(BALL_RADIUS, 24, 24), MAT_CUEBALL);
+  cueBallMesh.position.set(0, feltY + BALL_RADIUS, playL / 4);
+  group.add(cueBallMesh);
+
+  return { group, playW, playL, feltY, pocketPositions, pocketRadius, cueBallMesh };
 }
 
+// ============================================================================
+// Cue Mode state machine  (mirrors CueModeManager.cs from the native version)
+// ============================================================================
+function getDownwardPitchAngle(cam) {
+  const forward = new THREE.Vector3();
+  cam.getWorldDirection(forward);
+  const angleFromStraightDown = forward.angleTo(new THREE.Vector3(0, -1, 0)) * (180 / Math.PI);
+  return 90 - angleFromStraightDown; // 0 = horizon, 90 = pointing straight down
+}
+
+function updateCueModeStateMachine() {
+  if (appState === 'SHOT' || !tableInfo) return;
+
+  const pitch = getDownwardPitchAngle(camera);
+  const dist = camera.position.distanceTo(tableInfo.group.position);
+  const nearTable = dist <= MAX_TABLE_DIST;
+
+  if (appState === 'FREE_LOOK') {
+    if (pitch >= ENTER_CUE_ANGLE && nearTable) enterCueMode();
+  } else if (appState === 'CUE_MODE') {
+    if (pitch < EXIT_CUE_ANGLE || !nearTable) exitCueMode();
+  }
+}
+
+function enterCueMode() {
+  appState = 'CUE_MODE';
+  cueModeUIEl.style.display = 'flex';
+  aimLine.visible = true;
+  strokeArmState = 'IDLE';
+  peakForwardSpeed = 0;
+  hintEl.textContent = 'Cue Mode — pull back, then swing forward to strike.';
+}
+
+function exitCueMode() {
+  appState = 'FREE_LOOK';
+  cueModeUIEl.style.display = 'none';
+  aimLine.visible = false;
+  strokeArmState = 'IDLE';
+  hintEl.textContent = 'Tilt the phone down toward the table to aim.';
+}
+
+// ============================================================================
+// Stroke detector  (mirrors StrokeDetector.cs — uses AR camera pose deltas
+// instead of raw accelerometer, since ARCore's tracked pose is already a
+// clean, filtered 6DOF signal derived from the IMU + camera fusion.)
+// ============================================================================
+function updateStrokeDetector(dt) {
+  const forward = new THREE.Vector3();
+  camera.getWorldDirection(forward);
+  forward.y = 0;
+  if (forward.lengthSq() < 0.0001) return;
+  forward.normalize();
+
+  const forwardSpeed = camVelocity.dot(forward); // signed speed along aim direction, m/s
+
+  switch (strokeArmState) {
+    case 'IDLE':
+      if (forwardSpeed <= BACKSWING_THRESHOLD) {
+        strokeArmState = 'BACKSWING';
+        strokeArmTimer = 0;
+      }
+      break;
+
+    case 'BACKSWING':
+      strokeArmTimer += dt;
+      if (strokeArmTimer > ARM_WINDOW_SECONDS) {
+        strokeArmState = 'IDLE';
+        break;
+      }
+      if (forwardSpeed >= STROKE_THRESHOLD) {
+        strokeArmState = 'STROKE';
+        peakForwardSpeed = forwardSpeed;
+      }
+      break;
+
+    case 'STROKE':
+      peakForwardSpeed = Math.max(peakForwardSpeed, forwardSpeed);
+      if (forwardSpeed <= DECEL_THRESHOLD) {
+        commitStroke(forward, peakForwardSpeed);
+        strokeArmState = 'IDLE';
+      }
+      break;
+  }
+
+  powerFillEl.style.width = `${Math.max(0, Math.min(1, peakForwardSpeed / MAX_EXPECTED_SPEED)) * 100}%`;
+  updateAimLine(forward);
+}
+
+function commitStroke(worldDirection, peakSpeed) {
+  if (!cueBallRef || !cueBallRef.active || !tableInfo) return;
+
+  // Convert the world-space aim direction into the table's local space,
+  // since ball physics runs in table-local coordinates.
+  const invQuat = tableInfo.group.quaternion.clone().invert();
+  const localDir = worldDirection.clone().applyQuaternion(invQuat);
+  localDir.y = 0;
+  if (localDir.lengthSq() < 0.0001) return;
+  localDir.normalize();
+
+  const power = Math.min(1, peakSpeed / MAX_EXPECTED_SPEED);
+  const speed = power * MAX_BALL_SPEED;
+  cueBallRef.vel.set(localDir.x * speed, 0, localDir.z * speed);
+
+  peakForwardSpeed = 0;
+  appState = 'SHOT';
+  cueModeUIEl.style.display = 'none';
+  aimLine.visible = false;
+  hintEl.textContent = '';
+}
+
+function updateAimLine(worldForward) {
+  if (!cueBallRef) return;
+  const ballWorldPos = new THREE.Vector3();
+  cueBallRef.mesh.getWorldPosition(ballWorldPos);
+
+  const lineLen = 0.22 + Math.min(1, peakForwardSpeed / MAX_EXPECTED_SPEED) * 0.12;
+  const start = ballWorldPos.clone().addScaledVector(worldForward, -lineLen);
+
+  const posAttr = aimLine.geometry.attributes.position;
+  posAttr.setXYZ(0, start.x, start.y, start.z);
+  posAttr.setXYZ(1, ballWorldPos.x, ballWorldPos.y, ballWorldPos.z);
+  posAttr.needsUpdate = true;
+}
+
+// ============================================================================
+// Ball physics  (mirrors CueBallHitter.cs's role, plus simple cushion/pocket
+// resolution — runs in the table's local X/Z plane)
+// ============================================================================
+function updateBallPhysics(dt) {
+  if (!tableInfo || dt <= 0) return;
+  const { playW, playL, feltY, pocketPositions, pocketRadius } = tableInfo;
+  let anyMoving = false;
+
+  for (const ball of balls) {
+    if (!ball.active) continue;
+    const speed = ball.vel.length();
+    if (speed <= 0.0001) continue;
+
+    anyMoving = true;
+    const newSpeed = Math.max(0, speed - FRICTION_DECEL * dt);
+    ball.vel.multiplyScalar(newSpeed / speed);
+    ball.pos.addScaledVector(ball.vel, dt);
+
+    let captured = false;
+    for (const [px, pz] of pocketPositions) {
+      const dx = ball.pos.x - px, dz = ball.pos.z - pz;
+      if (dx * dx + dz * dz < pocketRadius * pocketRadius) {
+        ball.active = false;
+        ball.mesh.visible = false;
+        captured = true;
+        break;
+      }
+    }
+    if (captured) continue;
+
+    const halfW = playW / 2 - BALL_RADIUS;
+    const halfL = playL / 2 - BALL_RADIUS;
+    if (ball.pos.x > halfW)  { ball.pos.x = halfW;  ball.vel.x *= -CUSHION_RESTITUTION; }
+    if (ball.pos.x < -halfW) { ball.pos.x = -halfW; ball.vel.x *= -CUSHION_RESTITUTION; }
+    if (ball.pos.z > halfL)  { ball.pos.z = halfL;  ball.vel.z *= -CUSHION_RESTITUTION; }
+    if (ball.pos.z < -halfL) { ball.pos.z = -halfL; ball.vel.z *= -CUSHION_RESTITUTION; }
+
+    ball.mesh.position.set(ball.pos.x, feltY + BALL_RADIUS, ball.pos.z);
+  }
+
+  if (appState === 'SHOT' && !anyMoving) {
+    appState = 'FREE_LOOK';
+    hintEl.textContent = 'Tilt the phone down toward the table to aim.';
+  }
+}
+
+// ============================================================================
+// Main loop
+// ============================================================================
 function onWindowResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
@@ -168,6 +506,10 @@ function render(timestamp, frame) {
         hitTestSourceRequested = false;
         hitTestSource = null;
         tablePlaced = false;
+        tableInfo = null;
+        balls = [];
+        cueBallRef = null;
+        prevCamPosInit = false;
       });
       hitTestSourceRequested = true;
     }
@@ -182,6 +524,26 @@ function render(timestamp, frame) {
       } else {
         reticle.visible = false;
       }
+    }
+
+    // dt in seconds, clamped to avoid a huge jump on the very first frame or a stutter.
+    const dt = lastTimestamp ? Math.min((timestamp - lastTimestamp) / 1000, 0.05) : 0;
+    lastTimestamp = timestamp;
+
+    if (tablePlaced) {
+      // Smoothed camera velocity from AR pose deltas — this is what stands in for the phone's IMU.
+      if (!prevCamPosInit) {
+        prevCamPos.copy(camera.position);
+        prevCamPosInit = true;
+      } else if (dt > 0) {
+        const instVel = new THREE.Vector3().subVectors(camera.position, prevCamPos).divideScalar(dt);
+        camVelocity.lerp(instVel, 0.35);
+        prevCamPos.copy(camera.position);
+      }
+
+      updateCueModeStateMachine();
+      if (appState === 'CUE_MODE') updateStrokeDetector(dt);
+      updateBallPhysics(dt);
     }
   }
 
