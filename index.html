@@ -81,6 +81,17 @@ let hitTestSourceRequested = false;
 let tablePlaced = false;
 let tableInfo = null;   // { group, playW, playL, feltY, pocketPositions, pocketRadius, cueBallMesh, objectBalls }
 let aimLine;
+let cueStickGroup;          // first-person "viewmodel" cue stick, parented to the camera
+let cueStickBaseZ = -0.34;  // local forward offset — how far the tip sits from the eye
+
+let shotCamera;             // virtual "down the cue" camera, used only while armed to strike
+let usingShotCamera = false;
+let lastAimForward = new THREE.Vector3(0, 0, -1);
+
+// How the shot camera sits relative to the cue ball while armed (all tunable):
+const SHOT_CAM_BACK_DIST = 0.30;  // how far behind the ball, along the aim line
+const SHOT_CAM_HEIGHT = 0.16;     // how high above the felt
+const SHOT_CAM_LOOK_AHEAD = 0.6;  // how far along the aim direction the camera looks toward
 
 let appState = 'FREE_LOOK';        // FREE_LOOK | CUE_MODE | SHOT
 let armedForStrike = false;        // must tap "Ready to Strike" before a swing counts
@@ -121,6 +132,9 @@ init();
 function init() {
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+  scene.add(camera); // required so camera's children (the cue stick viewmodel) actually render
+
+  shotCamera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.01, 20);
 
   const light = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2);
   light.position.set(0.5, 1, 0.25);
@@ -144,6 +158,7 @@ function init() {
     peakForwardSpeed = 0;
     strikeBtn.textContent = 'Armed — pull back, then swing';
     strikeBtn.disabled = true;
+    enterShotCameraView();
   });
 
   const startBtn = document.getElementById('start-btn');
@@ -180,6 +195,8 @@ function init() {
   aimLine = new THREE.Line(aimGeo, aimMat);
   aimLine.visible = false;
   scene.add(aimLine);
+
+  buildCueStickViewmodel();
 
   const controller = renderer.xr.getController(0);
   controller.addEventListener('select', onSelect);
@@ -431,6 +448,94 @@ function buildPoolTable() {
 }
 
 // ============================================================================
+// Cue stick viewmodel — a small 3D cue model attached to the camera itself
+// (like a first-person weapon model), so the framing always reads as
+// "sighting down a cue" regardless of exactly how high the phone is held.
+// The AR camera's real position/rotation can't be overridden (see notes
+// elsewhere), so this is the practical way to get that visual language —
+// physically lowering the phone near table height still helps, but this
+// means the shot doesn't *require* a perfect crouch to look right.
+// ============================================================================
+function buildCueStickViewmodel() {
+  cueStickGroup = new THREE.Group();
+
+  const shaftMat = new THREE.MeshStandardMaterial({ color: 0xc9a06a, roughness: 0.5 });
+  const tipMat = new THREE.MeshStandardMaterial({ color: 0x2a6fb0, roughness: 0.6 }); // chalked tip
+  const buttMat = new THREE.MeshStandardMaterial({ color: 0x2b1a10, roughness: 0.6 });
+
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.013, 1.1, 12), shaftMat);
+  const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.012, 12), tipMat);
+  const butt = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.016, 0.09, 12), buttMat);
+
+  // Cylinder axis defaults to Y; lay the stick along its own -Y so "tip" is at the
+  // group's local origin (near the ball) and "butt" trails back toward the player.
+  shaft.position.y = -0.55;
+  tip.position.y = -1.106;
+  butt.position.y = 0.045;
+
+  cueStickGroup.add(shaft, tip, butt);
+
+  // Orient + place relative to the camera: bottom-right of frame, angled in toward
+  // screen center, tip pointing forward — this is what reads as "down the cue."
+  cueStickGroup.position.set(0.10, -0.20, cueStickBaseZ);
+  cueStickGroup.rotation.set(-1.05, 0.22, 0.18);
+  cueStickGroup.visible = false;
+
+  camera.add(cueStickGroup);
+}
+
+/** Slides the viewmodel along its own aim axis to mirror the real pull-back/swing motion. */
+function updateCueStickVisual() {
+  if (!cueStickGroup) return;
+  let offset = 0;
+  if (strokeArmState === 'BACKSWING') {
+    offset = Math.min(0.07, strokeArmTimer * 0.12);       // pulls the tip away from the ball
+  } else if (strokeArmState === 'STROKE') {
+    offset = -Math.min(0.05, (peakForwardSpeed / MAX_EXPECTED_SPEED) * 0.05); // pushes tip toward the ball
+  }
+  cueStickGroup.position.z = cueStickBaseZ + offset;
+}
+
+// ============================================================================
+// Shot camera (POV mode) — switches rendering to a virtual "down the cue"
+// camera fixed near the cue ball once the player taps "Ready to Strike."
+// Aiming still comes from the real phone's tracked rotation (read off the
+// AR camera each frame), it just no longer needs to physically match the
+// phone's exact height/position to LOOK like sighting down a cue.
+//
+// Caveat worth knowing: WebXR's AR passthrough is composited by the browser
+// based on the session's real camera pose, not something we fully control
+// from three.js. Switching the *render* camera to shotCamera does NOT change
+// what real-world video shows behind it — so the background will keep
+// showing your literal phone view while the 3D table/ball/cue jump to the
+// fixed POV angle. This attempts an opaque backdrop (matching the felt
+// color) to hide that mismatch; if it doesn't fully hide the passthrough on
+// your device, a solid near-camera plane is the more reliable fallback.
+// ============================================================================
+function enterShotCameraView() {
+  usingShotCamera = true;
+  renderer.setClearColor(0x0b3d1f, 1); // opaque felt-green backdrop instead of see-through
+}
+
+function exitShotCameraView() {
+  usingShotCamera = false;
+  renderer.setClearColor(0x000000, 0); // back to transparent AR passthrough
+}
+
+function updateShotCameraPose(aimForward) {
+  if (!cueBallRef || !cueBallRef.active) return;
+  const ballPos = new THREE.Vector3();
+  cueBallRef.mesh.getWorldPosition(ballPos);
+
+  const behind = aimForward.clone().negate().multiplyScalar(SHOT_CAM_BACK_DIST);
+  shotCamera.position.copy(ballPos).add(behind);
+  shotCamera.position.y = ballPos.y + SHOT_CAM_HEIGHT;
+
+  const lookTarget = ballPos.clone().addScaledVector(aimForward, SHOT_CAM_LOOK_AHEAD);
+  shotCamera.lookAt(lookTarget);
+}
+
+// ============================================================================
 // Cue Mode state machine
 // ============================================================================
 function getDownwardPitchAngle(cam) {
@@ -458,6 +563,7 @@ function enterCueMode() {
   appState = 'CUE_MODE';
   cueModeUIEl.style.display = 'flex';
   aimLine.visible = true;
+  if (cueStickGroup) cueStickGroup.visible = true;
   strokeArmState = 'IDLE';
   peakForwardSpeed = 0;
   armedForStrike = false;
@@ -470,8 +576,10 @@ function exitCueMode() {
   appState = 'FREE_LOOK';
   cueModeUIEl.style.display = 'none';
   aimLine.visible = false;
+  if (cueStickGroup) cueStickGroup.visible = false;
   strokeArmState = 'IDLE';
   armedForStrike = false;
+  if (usingShotCamera) exitShotCameraView();
   hintEl.textContent = 'Tilt the phone down toward the table to aim.';
 }
 
@@ -486,8 +594,10 @@ function updateStrokeDetector(dt) {
   forward.y = 0;
   if (forward.lengthSq() < 0.0001) return;
   forward.normalize();
+  lastAimForward.copy(forward);
 
   updateAimLine(forward);
+  updateCueStickVisual();
 
   if (!armedForStrike) return;
 
@@ -541,6 +651,11 @@ function commitStroke(worldDirection, peakSpeed) {
   appState = 'SHOT';
   cueModeUIEl.style.display = 'none';
   aimLine.visible = false;
+  if (cueStickGroup) {
+    cueStickGroup.visible = false;
+    cueStickGroup.position.z = cueStickBaseZ;
+  }
+  if (usingShotCamera) exitShotCameraView();
   hintEl.textContent = '';
 }
 
@@ -678,6 +793,8 @@ function updateTableOcclusionGuard() {
 function onWindowResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
+  shotCamera.aspect = window.innerWidth / window.innerHeight;
+  shotCamera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
@@ -701,6 +818,7 @@ function render(timestamp, frame) {
         cueBallRef = null;
         prevCamPosInit = false;
         insideTableWarning = false;
+        if (usingShotCamera) exitShotCameraView();
       });
       hitTestSourceRequested = true;
     }
@@ -731,12 +849,15 @@ function render(timestamp, frame) {
 
       updateTableOcclusionGuard();
       updateCueModeStateMachine();
-      if (appState === 'CUE_MODE') updateStrokeDetector(dt);
+      if (appState === 'CUE_MODE') {
+        updateStrokeDetector(dt);
+        if (usingShotCamera) updateShotCameraPose(lastAimForward);
+      }
       updateBallPhysics(dt);
     }
   }
 
-  renderer.render(scene, camera);
+  renderer.render(scene, usingShotCamera ? shotCamera : camera);
 }
 </script>
 </body>
