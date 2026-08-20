@@ -2,746 +2,911 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>FORM/01 — Workout Rep &amp; Form Monitor</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>AR 8-Ball — WebXR</title>
 <style>
-  :root{
-    --bg:#14171A; --panel:#1B1F23; --line:#2C3238; --text:#EDEEF0; --muted:#8A9099;
-    --good:#C6FF3D; --warn:#FF8A3D; --bad:#FF4D4D;
+  html, body { margin: 0; padding: 0; overflow: hidden; height: 100%; background: #000; }
+  #overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    display: flex; flex-direction: column; align-items: center;
+    padding-top: 16px; pointer-events: none; font-family: sans-serif; color: white;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.8); z-index: 10;
   }
-  *{box-sizing:border-box;}
-  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;}
-  .wrap{max-width:640px;margin:0 auto;padding:20px 16px 60px;}
-  header{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:18px;border-bottom:1px solid var(--line);padding-bottom:14px;}
-  .mark{font-family:'Oswald',sans-serif;font-weight:700;font-size:22px;letter-spacing:0.5px;}
-  .mark span{color:var(--good);}
-  .sub{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;}
-
-  .exercise-tabs{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;}
-  .ex-tab{flex:1;min-width:90px;background:var(--panel);border:1px solid var(--line);color:var(--muted);padding:10px;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:1px;text-transform:uppercase;border-radius:3px;cursor:pointer;text-align:center;}
-  .ex-tab.active{border-color:var(--good);color:var(--good);background:rgba(198,255,61,0.08);}
-
-  .stage{position:relative;border-radius:4px;overflow:hidden;border:1px solid var(--line);background:#000;aspect-ratio:3/4;max-height:78vh;margin:0 auto;}
-  .stage canvas{width:100%;height:100%;display:block;}
-
-  .hud-top{position:absolute;top:12px;left:12px;right:12px;display:flex;justify-content:space-between;align-items:flex-start;pointer-events:none;}
-  .rep-count{font-family:'Oswald',sans-serif;font-weight:700;font-size:48px;line-height:1;text-shadow:0 2px 12px rgba(0,0,0,0.7);}
-  .rep-label{font-size:10px;letter-spacing:2px;color:var(--muted);text-transform:uppercase;margin-top:2px;}
-  .phase-chip{padding:5px 10px;border-radius:2px;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;border:1px solid var(--line);background:rgba(20,23,26,0.85);}
-
-  .angle-readout{position:absolute;bottom:12px;left:12px;background:rgba(20,23,26,0.85);border:1px solid var(--line);border-radius:2px;padding:8px 10px;font-family:'JetBrains Mono',monospace;pointer-events:none;}
-  .angle-readout .val{font-family:'Oswald',sans-serif;font-size:22px;font-weight:600;}
-  .angle-readout .lab{font-size:9px;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;}
-
-  .alert-bar{position:absolute;left:12px;right:12px;bottom:12px;text-align:center;padding:10px;border-radius:2px;font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:0.3px;font-weight:600;opacity:0;transform:translateY(6px);transition:all .15s ease;pointer-events:none;}
-  .alert-bar.show{opacity:1;transform:translateY(0);}
-  .alert-bar.warn{background:rgba(255,138,61,0.16);border:1px solid var(--warn);color:var(--warn);}
-  .alert-bar.bad{background:rgba(255,77,77,0.18);border:1px solid var(--bad);color:var(--bad);}
-  .alert-bar.good{background:rgba(198,255,61,0.14);border:1px solid var(--good);color:var(--good);}
-
-  .start-overlay{position:absolute;inset:0;background:rgba(10,12,14,0.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px;}
-  .start-overlay.hide{display:none;}
-  .start-overlay p{color:var(--muted);font-size:13px;max-width:320px;line-height:1.5;margin:0;}
-
-  .controls{display:flex;gap:10px;margin-top:16px;}
-  button{flex:1;background:var(--panel);border:1px solid var(--line);color:var(--text);padding:12px;font-family:'Inter',sans-serif;font-weight:600;font-size:14px;border-radius:3px;cursor:pointer;}
-  button:hover{border-color:var(--good);}
-  button.primary{background:var(--good);color:#0E1012;border-color:var(--good);}
-  button:disabled{opacity:0.4;cursor:default;}
-
-  .panel{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:16px;margin-top:14px;}
-  .panel h2{font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin:0 0 12px;}
-  .rules{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
-  .rule{display:flex;justify-content:space-between;align-items:center;font-family:'JetBrains Mono',monospace;font-size:12px;border-bottom:1px dashed var(--line);padding-bottom:8px;}
-  .rule .ok{color:var(--good);}
-
-  .log{display:flex;flex-direction:column-reverse;gap:6px;max-height:160px;overflow-y:auto;}
-  .log-row{display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:12px;padding:6px 8px;background:#14171A;border-radius:2px;border-left:2px solid var(--line);}
-  .log-row.good{border-left-color:var(--good);}
-  .log-row.flag{border-left-color:var(--warn);color:var(--warn);}
-
-  .note{font-size:12px;color:var(--muted);line-height:1.5;margin-top:14px;}
+  #hint { font-size: 14px; opacity: 0.85; text-align: center; padding: 0 16px; }
+  #warn {
+    display: none; margin-top: 8px; font-size: 13px; color: #ffcc66;
+    background: rgba(0,0,0,0.5); padding: 4px 10px; border-radius: 6px;
+  }
+  #cueModeUI { display: none; flex-direction: column; align-items: center; margin-top: 10px; }
+  #power-bar-track {
+    width: 160px; height: 10px; background: rgba(255,255,255,0.25);
+    border-radius: 6px; overflow: hidden; margin-top: 4px;
+  }
+  #power-bar-fill { width: 0%; height: 100%; background: #ffdd55; }
+  #crosshair {
+    display: none; position: fixed; top: 50%; left: 50%;
+    transform: translate(-50%, -50%); width: 26px; height: 26px; z-index: 5;
+  }
+  #crosshair::before, #crosshair::after {
+    content: ''; position: absolute; background: rgba(255,255,255,0.85);
+  }
+  #crosshair::before { top: 50%; left: 0; width: 100%; height: 2px; transform: translateY(-50%); }
+  #crosshair::after { left: 50%; top: 0; height: 100%; width: 2px; transform: translateX(-50%); }
+  #strike-btn {
+    pointer-events: auto; margin-top: 14px; padding: 12px 26px; font-size: 15px;
+    border-radius: 999px; border: none; background: #d1352b; color: white;
+    font-family: sans-serif; font-weight: 600;
+  }
+  #strike-btn:disabled { background: #7a2f2f; opacity: 0.8; }
+  #start-btn {
+    position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+    padding: 14px 28px; font-size: 16px; border-radius: 999px; border: none;
+    background: #1a73e8; color: white; font-family: sans-serif; z-index: 10;
+  }
+  #unsupported {
+    position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    background: #111; color: white; font-family: sans-serif; text-align: center; padding: 24px; z-index: 20;
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <div>
-      <div class="mark">FORM<span>/01</span></div>
-      <div class="sub" id="subLabel">Squat — depth &amp; technique monitor</div>
-    </div>
-    <div class="sub" id="modelStatus">MODEL: LOADING</div>
-  </header>
 
-  <div class="exercise-tabs" id="exTabs"></div>
-
-  <div class="stage" id="stage">
-    <canvas id="cnv"></canvas>
-    <div class="hud-top">
-      <div>
-        <div class="rep-count" id="repCount">0</div>
-        <div class="rep-label">Reps</div>
-      </div>
-      <div class="phase-chip" id="phaseChip">STANDBY</div>
-    </div>
-    <div class="angle-readout">
-      <div class="val" id="angleVal">--°</div>
-      <div class="lab" id="angleLab">Angle</div>
-    </div>
-    <div class="alert-bar" id="alertBar"></div>
-
-    <div class="start-overlay" id="startOverlay">
-      <div class="mark">FORM<span>/01</span></div>
-      <p id="startCopy">Stand where your full body is visible. Your outline traces you live — yellow while you're getting into position, green once you're framed correctly.</p>
-      <button class="primary" id="startBtn" style="flex:none;padding:12px 28px;">Start camera</button>
-    </div>
+<div id="overlay">
+  <div id="hint">Point your camera at the floor, tap "Start AR", then tap a flat surface to place the table.</div>
+  <div id="warn">You're standing inside the table — step back.</div>
+  <div id="crosshair"></div>
+  <div id="cueModeUI">
+    <div id="power-bar-track"><div id="power-bar-fill"></div></div>
+    <button id="strike-btn">Ready to Strike</button>
   </div>
-
-  <div class="controls">
-    <button id="resetBtn" disabled>Reset reps</button>
-    <button id="realignBtn" disabled>Realign</button>
-    <button id="endBtn" disabled>End workout</button>
+</div>
+<button id="start-btn">Start AR</button>
+<div id="unsupported">
+  <div>
+    WebXR AR isn't available in this browser.<br /><br />
+    Use <b>Chrome on Android</b> (Safari on iPhone doesn't support handheld WebXR AR yet).
   </div>
-
-  <div class="panel">
-    <h2 id="rulesTitle">Technique rules</h2>
-    <div class="rules" id="rulesGrid"></div>
-  </div>
-
-  <div class="panel">
-    <h2>Rep log</h2>
-    <div class="log" id="log"></div>
-  </div>
-
-  <p class="note">
-    Runs fully in-browser on MediaPipe's BlazePose (Heavy model, GPU-accelerated) — no video ever leaves your device.
-    Your outline is traced live from your own detected joints — it adapts to your height and distance automatically,
-    so there's no fixed spot you need to stand on. It shows yellow until your framing is right, then holds green
-    briefly before the exercise starts. Rep angles are measured from MediaPipe's real-world 3D landmarks (metric,
-    hip-centered) rather than flat screen coordinates, and lightly smoothed frame-to-frame to avoid jitter — the
-    same approach Google documents in their own pose-classification pipeline. Floor exercises like push-ups work
-    best with the phone propped low and angled to see your whole body side-on. If the camera doesn't start in an
-    embedded preview, download this file and open it directly, or serve it from GitHub Pages / Cloudflare Pages.
-  </p>
 </div>
 
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
 <script type="module">
-import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm";
+import * as THREE from 'three';
+import { ARButton } from 'three/addons/webxr/ARButton.js';
 
-// ---- landmark indices (BlazePose 33-point topology) ----
-const L = {
-  NOSE:0, L_SHOULDER:11, R_SHOULDER:12, L_ELBOW:13, R_ELBOW:14, L_WRIST:15, R_WRIST:16,
-  L_HIP:23, R_HIP:24, L_KNEE:25, R_KNEE:26, L_ANKLE:27, R_ANKLE:28
-};
+// ============================================================================
+// Globals
+// ============================================================================
+let camera, scene, renderer;
+let reticle;
+let hitTestSource = null;
+let hitTestSourceRequested = false;
+let tablePlaced = false;
+let tableInfo = null;   // { group, playW, playL, feltY, pocketPositions, pocketRadius, cueBallMesh, objectBalls }
+let aimLine;
+let cueStickGroup;          // first-person "viewmodel" cue stick, parented to the camera
+let cueStickBaseZ = -0.34;  // local forward offset — how far the tip sits from the eye
 
-// Every exercise defines:
-//  - alignLandmarks: which joints must be visible to gate alignment; also used to
-//    measure the body's bounding-box diagonal for the adaptive framing check
-//  - minDiagFrac / maxDiagFrac: acceptable body-diagonal size as a fraction of the frame
-//    diagonal — NOT fixed pixel positions, so this adapts to any height or camera distance
-//  - type: "angle" (rep-counted via a joint angle) or "footwork" (rep-counted via a step sequence)
-const EXERCISES = {
-  squat: {
-    label: "SQUAT", sub: "Squat — depth & technique monitor", type: "angle",
-    left: [L.L_HIP, L.L_KNEE, L.L_ANKLE], right: [L.R_HIP, L.R_KNEE, L.R_ANKLE],
-    angleLabel: "Knee angle", depthMax: 100, lockoutMin: 165,
-    // landmarks required for the alignment gate, and the acceptable body-diagonal size range —
-    // fractions of the frame diagonal, NOT fixed pixel positions, so this works at any height/distance
-    alignLandmarks: [L.L_SHOULDER, L.R_SHOULDER, L.L_HIP, L.R_HIP, L.L_KNEE, L.R_KNEE, L.L_ANKLE, L.R_ANKLE],
-    minDiagFrac: 0.55, maxDiagFrac: 1.05,
-    startCopy: "Stand where your full body is visible, feet included. Your outline will glow yellow, then green once you're framed correctly.",
-    rules: [["Depth target","≤ 100°"],["Lockout target","≥ 165°"],["Stance","shoulder-width"],["Torso","chest up"]]
-  },
-  curl: {
-    label: "BICEP CURL", sub: "Bicep curl — rep & form monitor", type: "angle",
-    left: [L.L_SHOULDER, L.L_ELBOW, L.L_WRIST], right: [L.R_SHOULDER, L.R_ELBOW, L.R_WRIST],
-    angleLabel: "Elbow angle", depthMax: 50, lockoutMin: 160,
-    // curl only needs the upper body — no reason to require feet in frame for this one
-    alignLandmarks: [L.L_SHOULDER, L.R_SHOULDER, L.L_ELBOW, L.R_ELBOW, L.L_WRIST, L.R_WRIST, L.L_HIP, L.R_HIP],
-    minDiagFrac: 0.28, maxDiagFrac: 0.85,
-    startCopy: "Frame your shoulders down to your hips — full body isn't needed for this one. Outline turns green once you're framed correctly.",
-    rules: [["Contraction","≤ 50°"],["Extension","≥ 160°"],["Elbow","pinned to side"],["Body swing","minimal"]]
-  },
-  jack: {
-    label: "JUMPING JACK", sub: "Jumping jack — footwork monitor", type: "footwork",
-    alignLandmarks: [L.L_SHOULDER, L.R_SHOULDER, L.L_HIP, L.R_HIP, L.L_KNEE, L.R_KNEE, L.L_ANKLE, L.R_ANKLE],
-    minDiagFrac: 0.55, maxDiagFrac: 1.05,
-    startCopy: "Stand where your full body is visible, arms included. Outline turns green once you're framed correctly.",
-    // ankle-to-ankle distance measured relative to the person's own shoulder width, not screen
-    // position — so "apart" and "together" work the same whether you're close or far from camera
-    steps: [
-      { name: "apart", minSpreadRatio: 1.3 },
-      { name: "together", maxSpreadRatio: 0.7 }
-    ],
-    rules: [["Pattern","feet apart / together"],["Rhythm","controlled"],["Landing","soft knees"],["Tracking","both feet"]]
-  },
-  pushup: {
-    label: "PUSH-UP", sub: "Push-up — rep & form monitor", type: "angle",
-    left: [L.L_SHOULDER, L.L_ELBOW, L.L_WRIST], right: [L.R_SHOULDER, L.R_ELBOW, L.R_WRIST],
-    angleLabel: "Elbow angle", depthMax: 95, lockoutMin: 160,
-    alignLandmarks: [L.L_SHOULDER, L.R_SHOULDER, L.L_ELBOW, L.R_ELBOW, L.L_WRIST, L.R_WRIST, L.L_HIP, L.R_HIP, L.L_KNEE, L.R_KNEE, L.L_ANKLE, L.R_ANKLE],
-    minDiagFrac: 0.45, maxDiagFrac: 1.0,
-    startCopy: "Get low — prop your phone so your whole body, hands to feet, is visible side-on. Outline turns green once you're framed correctly.",
-    rules: [["Depth target","≤ 95°"],["Lockout target","≥ 160°"],["Body line","straight, no sag"],["Camera","side-on, floor level"]]
-  }
-};
+let ghostBallMesh;           // translucent ball showing predicted cue-ball contact point
+let ghostTrajLine;           // predicted post-contact direction of the object ball
 
-const ALIGN_HOLD_MS = 800;
-const STEP_HOLD_MS = 120;
-// EMA smoothing factor for the angle/spread signal — matches Google's own documented practice
-// of smoothing the tracked signal before feeding a state machine, to prevent single-frame
-// jitter from causing phantom phase transitions. Higher = more responsive, lower = smoother.
-const EMA_ALPHA = 0.4;
-const EDGE_MARGIN = 0.04;          // required clearance from frame edges, as a fraction of width/height
-const CENTER_BAND_X = [0.15, 0.85]; // acceptable horizontal center of the body bbox, as a fraction of width
-const CENTER_BAND_Y = [0.08, 0.92]; // acceptable vertical center, looser since standing exercises naturally sit low
+let appState = 'FREE_LOOK';        // FREE_LOOK | CUE_MODE | SHOT
+let armedForStrike = false;        // must tap "Ready to Strike" before a swing counts
 
-let currentExercise = "squat";
-let poseLandmarker = null;
-let modelReady = false;
-let video, canvas, ctx, canvasW = 480, canvasH = 640;
-let rafId = null;
-let workoutActive = false;
-let firstPoseAt = null;
-let watchdogTimer = null;
+const ENTER_CUE_ANGLE = 55;
+const EXIT_CUE_ANGLE = 40;
+const MAX_TABLE_DIST = 3.5;
 
-let appMode = "align";          // "align" (fit into the outline) -> "tracking" (doing the exercise)
-let alignStartTime = null;
+const BACKSWING_THRESHOLD = -0.15;
+const STROKE_THRESHOLD = 0.35;
+const DECEL_THRESHOLD = 0.12;
+const ARM_WINDOW_SECONDS = 1.2;
+const MAX_EXPECTED_SPEED = 1.2;
+const MAX_BALL_SPEED = 3.2;
 
-let phase = "standby";          // angle-exercise rep state
-let repCount = 0;
+const BALL_RADIUS = 0.028;
+const FRICTION_DECEL = 1.1;
+const CUSHION_RESTITUTION = 0.72;
+const COLLISION_RESTITUTION = 0.95;
 
-let stepIndex = 0;              // footwork-exercise state
-let stepHoldStart = null;
+let strokeArmState = 'IDLE';
+let strokeArmTimer = 0;
+let peakForwardSpeed = 0;
+let prevCamPos = new THREE.Vector3();
+let camVelocity = new THREE.Vector3();
+let prevCamPosInit = false;
+let lastTimestamp = 0;
 
-let smoothedAngle = null;       // EMA-smoothed angle, reset whenever a fresh set starts
-let smoothedSpread = null;      // EMA-smoothed foot-spread ratio, same purpose
+let balls = [];        // ALL physics balls (cue + 15 object balls): { mesh, pos, vel, active, isCue, number }
+let cueBallRef = null;
 
-// ============================================================
-// geometry helpers
-// ============================================================
-function toPx(lm) { return { x: lm.x * canvasW, y: lm.y * canvasH }; }
-function toDisplayPx(lm) { return { x: canvasW - lm.x * canvasW, y: lm.y * canvasH }; } // mirrored, for drawing/matching
-function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+let insideTableWarning = false;
 
-function angleBetween(a, b, c) {
-  // z defaults to 0 when absent, so this works unchanged for 2D pixel points (drawing/
-  // outline math) and also for 3D worldLandmarks points (meters) used for rep-counting angles
-  const ab = { x: a.x - b.x, y: a.y - b.y, z: (a.z || 0) - (b.z || 0) };
-  const cb = { x: c.x - b.x, y: c.y - b.y, z: (c.z || 0) - (b.z || 0) };
-  const magAb = Math.hypot(ab.x, ab.y, ab.z), magCb = Math.hypot(cb.x, cb.y, cb.z);
-  if (magAb === 0 || magCb === 0) return null;
-  let cosv = (ab.x * cb.x + ab.y * cb.y + ab.z * cb.z) / (magAb * magCb);
-  cosv = Math.max(-1, Math.min(1, cosv));
-  return (Math.acos(cosv) * 180) / Math.PI;
-}
+let hintEl, warnEl, cueModeUIEl, powerFillEl, strikeBtn, crosshairEl;
 
-function ema(prev, next) { return prev == null ? next : prev + EMA_ALPHA * (next - prev); }
+init();
 
-function vis(landmarks, idx) {
-  const p = landmarks[idx];
-  return p && (p.visibility == null || p.visibility > 0.4) ? p : null;
-}
+function init() {
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+  scene.add(camera); // required so camera's children (the cue stick viewmodel) actually render
 
-function pickSide(landmarks, cfg) {
-  const l = cfg.left.map((i) => vis(landmarks, i));
-  const r = cfg.right.map((i) => vis(landmarks, i));
-  const score = (arr) => arr.reduce((s, p) => s + (p ? 1 : 0), 0);
-  const useLeft = score(l) >= score(r);
-  return { pts: useLeft ? l : r, idxs: useLeft ? cfg.left : cfg.right };
-}
+  const light = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2);
+  light.position.set(0.5, 1, 0.25);
+  scene.add(light);
 
-// ============================================================
-// canvas setup
-// ============================================================
-function fitCanvas() {
-  const rect = canvas.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
-  canvasW = Math.round(rect.width * dpr);
-  canvasH = Math.round(rect.height * dpr);
-  canvas.width = canvasW;
-  canvas.height = canvasH;
-}
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.xr.enabled = true;
+  document.body.appendChild(renderer.domElement);
 
-// ============================================================
-// contact-point markers removed — alignment and outline now trace the person's actual
-// live joint positions instead of matching against fixed on-screen targets.
-// ============================================================
+  hintEl = document.getElementById('hint');
+  warnEl = document.getElementById('warn');
+  cueModeUIEl = document.getElementById('cueModeUI');
+  powerFillEl = document.getElementById('power-bar-fill');
+  strikeBtn = document.getElementById('strike-btn');
+  crosshairEl = document.getElementById('crosshair');
 
-// ============================================================
-// adaptive framing check — replaces fixed-fraction target matching. Uses the bounding
-// box of the person's OWN detected joints, sized relative to the frame diagonal, so it
-// works at any height or camera distance instead of assuming one fixed body scale.
-// ============================================================
-function evaluateFraming(landmarks, cfg) {
-  const pts = cfg.alignLandmarks.map((i) => vis(landmarks, i));
-  const allVisible = pts.every(Boolean);
-  let reason = null, bbox = null;
+  strikeBtn.addEventListener('click', () => {
+    armedForStrike = true;
+    strokeArmState = 'IDLE';
+    peakForwardSpeed = 0;
+    strikeBtn.textContent = 'Armed — pull back, then swing';
+    strikeBtn.disabled = true;
+  });
 
-  if (allVisible) {
-    const dpts = pts.map(toDisplayPx);
-    const xs = dpts.map((p) => p.x), ys = dpts.map((p) => p.y);
-    bbox = { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
-    const diag = Math.hypot(bbox.maxX - bbox.minX, bbox.maxY - bbox.minY);
-    const diagFrac = diag / Math.hypot(canvasW, canvasH);
-    const cx = (bbox.minX + bbox.maxX) / 2 / canvasW;
-    const cy = (bbox.minY + bbox.maxY) / 2 / canvasH;
-    const clipped =
-      bbox.minX < EDGE_MARGIN * canvasW || bbox.maxX > (1 - EDGE_MARGIN) * canvasW ||
-      bbox.minY < EDGE_MARGIN * canvasH || bbox.maxY > (1 - EDGE_MARGIN) * canvasH;
-
-    if (diagFrac < cfg.minDiagFrac) reason = "far";
-    else if (diagFrac > cfg.maxDiagFrac) reason = "close";
-    else if (cx < CENTER_BAND_X[0] || cx > CENTER_BAND_X[1] || cy < CENTER_BAND_Y[0] || cy > CENTER_BAND_Y[1]) reason = "center";
-    else if (clipped) reason = "clipped";
+  const startBtn = document.getElementById('start-btn');
+  if ('xr' in navigator) {
+    navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
+      if (!supported) {
+        document.getElementById('unsupported').style.display = 'flex';
+        startBtn.style.display = 'none';
+      }
+    });
   } else {
-    reason = "missing";
+    document.getElementById('unsupported').style.display = 'flex';
+    startBtn.style.display = 'none';
   }
 
-  return { allVisible, reason, bbox, aligned: allVisible && reason == null };
+  const arButton = ARButton.createButton(renderer, {
+    requiredFeatures: ['hit-test'],
+    optionalFeatures: ['dom-overlay'],
+    domOverlay: { root: document.getElementById('overlay') }
+  });
+  startBtn.addEventListener('click', () => arButton.click());
+  arButton.style.display = 'none';
+  document.body.appendChild(arButton);
+
+  const ringGeo = new THREE.RingGeometry(0.08, 0.10, 32).rotateX(-Math.PI / 2);
+  const ringMat = new THREE.MeshBasicMaterial({ color: 0x1a73e8 });
+  reticle = new THREE.Mesh(ringGeo, ringMat);
+  reticle.matrixAutoUpdate = false;
+  reticle.visible = false;
+  scene.add(reticle);
+
+  const aimGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+  const aimMat = new THREE.LineBasicMaterial({ color: 0xffdd55 });
+  aimLine = new THREE.Line(aimGeo, aimMat);
+  aimLine.visible = false;
+  scene.add(aimLine);
+
+  const ghostMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35, depthWrite: false });
+  ghostBallMesh = new THREE.Mesh(new THREE.SphereGeometry(BALL_RADIUS, 20, 20), ghostMat);
+  ghostBallMesh.visible = false;
+  scene.add(ghostBallMesh);
+
+  const ghostTrajGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+  const ghostTrajMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55 });
+  ghostTrajLine = new THREE.Line(ghostTrajGeo, ghostTrajMat);
+  ghostTrajLine.visible = false;
+  scene.add(ghostTrajLine);
+
+  buildCueStickViewmodel();
+
+  const controller = renderer.xr.getController(0);
+  controller.addEventListener('select', onSelect);
+  scene.add(controller);
+
+  window.addEventListener('resize', onWindowResize);
+  renderer.setAnimationLoop(render);
 }
 
-function alignReasonText(reason) {
-  switch (reason) {
-    case "missing": return "Move so your full body is visible";
-    case "far": return "Step closer to the camera";
-    case "close": return "Step back from the camera";
-    case "center": return "Move to the center of frame";
-    case "clipped": return "Move fully into frame";
-    default: return "Hold still — aligning…";
-  }
-}
+function onSelect() {
+  if (!reticle.visible || tablePlaced) return;
 
-// ============================================================
-// live body outline — traced from the person's actual detected joints every frame,
-// so it always matches their real size and position. Yellow while framing isn't yet
-// correct, green once it is. Works for standing or plank orientation without special-
-// casing, because it's built from real anatomy (shoulder→hip direction) rather than
-// an assumed pose.
-// ============================================================
-function drawLiveOutline(landmarks, aligned) {
-  const lS = vis(landmarks, L.L_SHOULDER), rS = vis(landmarks, L.R_SHOULDER);
-  if (!lS || !rS) return; // need at least shoulders to anchor anything
+  tableInfo = buildPoolTable();
+  reticle.matrix.decompose(tableInfo.group.position, tableInfo.group.quaternion, tableInfo.group.scale);
+  scene.add(tableInfo.group);
 
-  const shoulderL = toDisplayPx(lS), shoulderR = toDisplayPx(rS);
-  const shoulderMidX = (shoulderL.x + shoulderR.x) / 2, shoulderMidY = (shoulderL.y + shoulderR.y) / 2;
-  const shoulderW = dist(shoulderL, shoulderR) || 1;
-
-  const fillTone = aligned ? "rgba(198,255,61,0.22)" : "rgba(255,214,10,0.18)";
-  const strokeTone = aligned ? "rgba(198,255,61,0.9)" : "rgba(255,214,10,0.85)";
-
-  ctx.save();
-  ctx.fillStyle = fillTone;
-  ctx.strokeStyle = strokeTone;
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-
-  const lH = vis(landmarks, L.L_HIP), rH = vis(landmarks, L.R_HIP);
-  let hipMidX = null, hipMidY = null;
-  if (lH && rH) {
-    const hipL = toDisplayPx(lH), hipR = toDisplayPx(rH);
-    hipMidX = (hipL.x + hipR.x) / 2; hipMidY = (hipL.y + hipR.y) / 2;
-
-    // filled torso panel
-    ctx.beginPath();
-    ctx.moveTo(shoulderL.x, shoulderL.y);
-    ctx.lineTo(shoulderR.x, shoulderR.y);
-    ctx.lineTo(hipR.x, hipR.y);
-    ctx.lineTo(hipL.x, hipL.y);
-    ctx.closePath();
-    ctx.fill();
-    ctx.lineWidth = shoulderW * 0.06;
-    ctx.stroke();
-  }
-
-  // limbs as thick rounded strokes, using whatever joints are currently visible
-  const limb = (i1, i2, i3, width) => {
-    const p1 = vis(landmarks, i1), p2 = vis(landmarks, i2);
-    if (!p1 || !p2) return;
-    const a = toDisplayPx(p1), b = toDisplayPx(p2);
-    ctx.lineWidth = width;
-    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-    const p3 = vis(landmarks, i3);
-    if (p3) {
-      const c = toDisplayPx(p3);
-      ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.stroke();
-    }
+  cueBallRef = {
+    mesh: tableInfo.cueBallMesh,
+    pos: new THREE.Vector3(tableInfo.cueBallMesh.position.x, 0, tableInfo.cueBallMesh.position.z),
+    vel: new THREE.Vector3(),
+    active: true,
+    isCue: true
   };
-  limb(L.L_SHOULDER, L.L_ELBOW, L.L_WRIST, shoulderW * 0.4);
-  limb(L.R_SHOULDER, L.R_ELBOW, L.R_WRIST, shoulderW * 0.4);
-  limb(L.L_HIP, L.L_KNEE, L.L_ANKLE, shoulderW * 0.48);
-  limb(L.R_HIP, L.R_KNEE, L.R_ANKLE, shoulderW * 0.48);
-
-  // head: anchored along the hip→shoulder direction so it lands correctly whether
-  // the person is standing upright or lying horizontal in a plank
-  const headR = shoulderW * 0.42;
-  let headCx = shoulderMidX, headCy = shoulderMidY - shoulderW * 0.9;
-  if (hipMidX != null) {
-    let dx = shoulderMidX - hipMidX, dy = shoulderMidY - hipMidY;
-    const len = Math.hypot(dx, dy) || 1;
-    dx /= len; dy /= len;
-    headCx = shoulderMidX + dx * headR * 2.4;
-    headCy = shoulderMidY + dy * headR * 2.4;
+  balls = [cueBallRef];
+  for (const ob of tableInfo.objectBalls) {
+    balls.push({
+      mesh: ob.mesh,
+      pos: new THREE.Vector3(ob.mesh.position.x, 0, ob.mesh.position.z),
+      vel: new THREE.Vector3(),
+      active: true,
+      isCue: false,
+      number: ob.number
+    });
   }
-  ctx.lineWidth = shoulderW * 0.06;
-  ctx.beginPath(); ctx.arc(headCx, headCy, headR, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
 
-  ctx.restore();
+  tablePlaced = true;
+  reticle.visible = false;
+  hintEl.textContent = 'Tilt the phone down toward the table to aim.';
 }
 
-// ============================================================
-// skeleton drawing (drawn on top of the outline once tracking starts)
-// ============================================================
-const BONES = [
-  [11,12],[11,13],[13,15],[12,14],[14,16],
-  [11,23],[12,24],[23,24],
-  [23,25],[25,27],[24,26],[26,28]
+// ============================================================================
+// Materials
+// ============================================================================
+const MAT_FELT    = new THREE.MeshStandardMaterial({ color: 0x0b6623, roughness: 0.95 });
+const MAT_WOOD     = new THREE.MeshStandardMaterial({ color: 0x3b2417, roughness: 0.6 });
+const MAT_CUSHION  = new THREE.MeshStandardMaterial({ color: 0x0a5a1f, roughness: 0.8 });
+const MAT_POCKET   = new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 0.9 });
+const MAT_LINE     = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 });
+const MAT_CUEBALL  = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 });
+
+function hexToCss(hex) { return '#' + hex.toString(16).padStart(6, '0'); }
+
+function makeSolidMaterial(hex) {
+  return new THREE.MeshStandardMaterial({ color: hex, roughness: 0.35 });
+}
+
+// Stripe balls: white base with a colored equatorial band, built as a small canvas
+// texture (no external image assets needed).
+function makeStripeMaterial(hex) {
+  const w = 128, h = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = hexToCss(hex);
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = '#ffffff';
+  const bandH = h * 0.62;
+  ctx.fillRect(0, (h - bandH) / 2, w, bandH);
+  const tex = new THREE.CanvasTexture(canvas);
+  return new THREE.MeshStandardMaterial({ map: tex, roughness: 0.35 });
+}
+
+const BALL_DATA = [
+  { num: 1, type: 'solid',  color: 0xf2c400 },
+  { num: 2, type: 'solid',  color: 0x1e5fbf },
+  { num: 3, type: 'solid',  color: 0xd1352b },
+  { num: 4, type: 'solid',  color: 0x6a2c91 },
+  { num: 5, type: 'solid',  color: 0xe07a17 },
+  { num: 6, type: 'solid',  color: 0x1c7a3a },
+  { num: 7, type: 'solid',  color: 0x7a2f2f },
+  { num: 8, type: 'eight',  color: 0x111111 },
+  { num: 9, type: 'stripe', color: 0xf2c400 },
+  { num: 10, type: 'stripe', color: 0x1e5fbf },
+  { num: 11, type: 'stripe', color: 0xd1352b },
+  { num: 12, type: 'stripe', color: 0x6a2c91 },
+  { num: 13, type: 'stripe', color: 0xe07a17 },
+  { num: 14, type: 'stripe', color: 0x1c7a3a },
+  { num: 15, type: 'stripe', color: 0x7a2f2f }
 ];
 
-function drawSkeleton(landmarks, tone) {
-  ctx.save();
-  ctx.strokeStyle = tone;
-  ctx.fillStyle = tone;
-  ctx.lineWidth = 3;
-  for (const [a, b] of BONES) {
-    const pa = landmarks[a], pb = landmarks[b];
-    if (!pa || !pb) continue;
-    if ((pa.visibility != null && pa.visibility < 0.4) || (pb.visibility != null && pb.visibility < 0.4)) continue;
-    const dpa = toDisplayPx(pa), dpb = toDisplayPx(pb);
-    ctx.beginPath(); ctx.moveTo(dpa.x, dpa.y); ctx.lineTo(dpb.x, dpb.y); ctx.stroke();
+// ============================================================================
+// Table construction
+// ============================================================================
+function buildPoolTable() {
+  const group = new THREE.Group();
+
+  const tableW = 1.42, tableL = 2.84;
+  const railWidth = 0.12;
+  const railHeight = 0.06;
+  const baseThickness = 0.04;
+  const playW = tableW - railWidth * 2;
+  const playL = tableL - railWidth * 2;
+  const pocketRadius = 0.055;
+  const cushionHeight = 0.025;
+  const cushionDepth = 0.035;
+  const cornerGap = pocketRadius * 2.3;
+  const sideGap = pocketRadius * 2.3;
+
+  const feltY = baseThickness;
+  const cushionY = feltY + cushionHeight / 2;
+  const railY = baseThickness + railHeight / 2;
+
+  const base = new THREE.Mesh(new THREE.BoxGeometry(tableW, baseThickness, tableL), MAT_WOOD);
+  base.position.y = baseThickness / 2;
+  group.add(base);
+
+  const felt = new THREE.Mesh(new THREE.BoxGeometry(playW, 0.004, playL), MAT_FELT);
+  felt.position.y = feltY;
+  group.add(felt);
+
+  const topRail = new THREE.Mesh(new THREE.BoxGeometry(tableW, railHeight, railWidth), MAT_WOOD);
+  topRail.position.set(0, railY, playL / 2 + railWidth / 2);
+  group.add(topRail);
+  const botRail = topRail.clone();
+  botRail.position.z = -(playL / 2 + railWidth / 2);
+  group.add(botRail);
+
+  const sideRailGeo = new THREE.BoxGeometry(railWidth, railHeight, playL);
+  const leftRail = new THREE.Mesh(sideRailGeo, MAT_WOOD);
+  leftRail.position.set(-(playW / 2 + railWidth / 2), railY, 0);
+  group.add(leftRail);
+  const rightRail = leftRail.clone();
+  rightRail.position.x = playW / 2 + railWidth / 2;
+  group.add(rightRail);
+
+  const pocketGeo = new THREE.CylinderGeometry(pocketRadius, pocketRadius, 0.01, 24);
+  const pocketPositions = [
+    [-playW / 2, playL / 2], [playW / 2, playL / 2],
+    [-playW / 2, -playL / 2], [playW / 2, -playL / 2],
+    [-playW / 2, 0], [playW / 2, 0]
+  ];
+  for (const [px, pz] of pocketPositions) {
+    const pocket = new THREE.Mesh(pocketGeo, MAT_POCKET);
+    pocket.position.set(px, feltY + 0.001, pz);
+    group.add(pocket);
   }
-  for (const p of landmarks) {
-    if (p.visibility != null && p.visibility < 0.4) continue;
-    const d = toDisplayPx(p);
-    ctx.beginPath(); ctx.arc(d.x, d.y, 4, 0, Math.PI * 2); ctx.fill();
-  }
-  ctx.restore();
-}
 
-// ============================================================
-// alignment mode — hold a correctly-framed position; outline glows green once matched
-// ============================================================
-function runAlignment(landmarks) {
-  const cfg = EXERCISES[currentExercise];
-  const framing = evaluateFraming(landmarks, cfg);
-  drawLiveOutline(landmarks, framing.aligned);
+  const shortSegLen = playW - 2 * cornerGap;
+  const shortCushionGeo = new THREE.BoxGeometry(shortSegLen, cushionHeight, cushionDepth);
+  const topCushion = new THREE.Mesh(shortCushionGeo, MAT_CUSHION);
+  topCushion.position.set(0, cushionY, playL / 2 - cushionDepth / 2);
+  group.add(topCushion);
+  const botCushion = new THREE.Mesh(shortCushionGeo, MAT_CUSHION);
+  botCushion.position.set(0, cushionY, -(playL / 2 - cushionDepth / 2));
+  group.add(botCushion);
 
-  const now = Date.now();
-  if (framing.aligned) {
-    if (alignStartTime == null) alignStartTime = now;
-    if (now - alignStartTime >= ALIGN_HOLD_MS) {
-      appMode = "tracking";
-      phase = "standby";
-      stepIndex = 0;
-      stepHoldStart = null;
-      smoothedAngle = null;
-      smoothedSpread = null;
-      setPhaseChip("TRACKING", "good");
-      hideAlert();
-      return;
-    }
-  } else {
-    alignStartTime = null;
-  }
-  setPhaseChip(framing.allVisible ? "ALIGNING" : "NOT VISIBLE", "warn");
-  showAlert(alignReasonText(framing.reason), "warn");
-}
-
-// ============================================================
-// angle-based exercises (squat, curl, push-up)
-// ============================================================
-function runAngleExercise(landmarks, worldLandmarks) {
-  const cfg = EXERCISES[currentExercise];
-  const framing = evaluateFraming(landmarks, cfg);
-  drawLiveOutline(landmarks, framing.aligned);
-
-  const { pts, idxs } = pickSide(landmarks, cfg);
-  if (pts.some((p) => !p)) { setPhaseChip("NO LOCK", "muted"); return; }
-
-  // Prefer MediaPipe's real-world landmarks — actual 3D coordinates in meters, hip-centered.
-  // These are scale-invariant by construction (no screen-size dependency at all), unlike the
-  // 2D image landmarks which are normalized to frame width/height. Angles are already scale-
-  // invariant even in 2D, but world landmarks are also robust to camera-angle perspective
-  // distortion since they're a real reconstruction, not a flat projection. Falls back to the
-  // 2D pixel points if world landmarks aren't available for some reason.
-  const worldPts = worldLandmarks ? idxs.map((i) => worldLandmarks[i]) : null;
-  const usingWorld = worldPts && worldPts.every(Boolean);
-  const anglePts = usingWorld ? worldPts : pts.map(toPx);
-  document.getElementById("angleLab").textContent = cfg.angleLabel + (usingWorld ? " · 3D" : " · 2D fallback");
-
-  const rawAngle = angleBetween(anglePts[0], anglePts[1], anglePts[2]);
-  if (rawAngle == null) return;
-
-  smoothedAngle = ema(smoothedAngle, rawAngle);
-  const angle = smoothedAngle;
-  document.getElementById("angleVal").textContent = Math.round(angle) + "°";
-
-  let tone = "rgba(198,255,61,0.9)";
-  if (phase === "standby" || phase === "up") {
-    setPhaseChip("READY", "good");
-    if (angle < cfg.lockoutMin - 15) phase = "descending";
-  }
-  if (phase === "descending") {
-    setPhaseChip("MOVING", "warn"); tone = "rgba(255,138,61,0.9)";
-    if (angle <= cfg.depthMax) phase = "down";
-  }
-  if (phase === "down") {
-    setPhaseChip("TARGET ✓", "good");
-    if (angle > cfg.depthMax + 8) phase = "ascending";
-  }
-  if (phase === "ascending") {
-    setPhaseChip("MOVING", "warn"); tone = "rgba(255,138,61,0.9)";
-    if (angle >= cfg.lockoutMin) { completeRep(true); phase = "up"; }
-  }
-  drawSkeleton(landmarks, tone);
-}
-
-function completeRep(clean) {
-  repCount += 1;
-  document.getElementById("repCount").textContent = repCount;
-  const row = document.createElement("div");
-  row.className = "log-row " + (clean ? "good" : "flag");
-  row.innerHTML = `<span>REP ${repCount}</span><span>${clean ? "clean" : "check form"}</span>`;
-  document.getElementById("log").appendChild(row);
-  showAlert("Rep complete", "good");
-}
-
-// ============================================================
-// footwork exercises (DDR-style — jumping jack)
-// foot spread is measured relative to the person's own shoulder width, not screen
-// position, so "apart" / "together" work the same at any distance from the camera
-// ============================================================
-function runFootworkExercise(landmarks) {
-  const cfg = EXERCISES[currentExercise];
-  const framing = evaluateFraming(landmarks, cfg);
-  drawLiveOutline(landmarks, framing.aligned);
-
-  const lS = vis(landmarks, L.L_SHOULDER), rS = vis(landmarks, L.R_SHOULDER);
-  const lA = vis(landmarks, L.L_ANKLE), rA = vis(landmarks, L.R_ANKLE);
-  if (!lS || !rS || !lA || !rA) { setPhaseChip("NO LOCK", "muted"); return; }
-
-  const shoulderW = dist(toDisplayPx(lS), toDisplayPx(rS)) || 1;
-  const ankleDist = dist(toDisplayPx(lA), toDisplayPx(rA));
-  const rawSpread = ankleDist / shoulderW;
-  smoothedSpread = ema(smoothedSpread, rawSpread);
-  const spreadRatio = smoothedSpread;
-
-  const step = cfg.steps[stepIndex];
-  const hit = step.name === "apart" ? spreadRatio >= step.minSpreadRatio : spreadRatio <= step.maxSpreadRatio;
-
-  document.getElementById("angleVal").textContent = spreadRatio.toFixed(2) + "x";
-  setPhaseChip(step.name === "apart" ? "STEP OUT" : "STEP IN", "warn");
-  drawSkeleton(landmarks, hit ? "rgba(198,255,61,0.9)" : "rgba(237,238,240,0.6)");
-
-  const now = Date.now();
-  if (hit) {
-    if (stepHoldStart == null) stepHoldStart = now;
-    if (now - stepHoldStart >= STEP_HOLD_MS) {
-      const wasLastStep = stepIndex === cfg.steps.length - 1;
-      stepIndex = (stepIndex + 1) % cfg.steps.length;
-      stepHoldStart = null;
-      if (wasLastStep) completeRep(true);
-    }
-  } else {
-    stepHoldStart = null;
-  }
-}
-
-// ============================================================
-// main render loop
-// ============================================================
-function renderLoop() {
-  if (!video || video.readyState < 2) { rafId = requestAnimationFrame(renderLoop); return; }
-  ctx.save();
-  ctx.translate(canvasW, 0);
-  ctx.scale(-1, 1);
-  ctx.drawImage(video, 0, 0, canvasW, canvasH);
-  ctx.restore();
-
-  if (modelReady && poseLandmarker) {
-    const result = poseLandmarker.detectForVideo(video, performance.now());
-    const landmarks = result.landmarks && result.landmarks[0];
-    const worldLandmarks = result.worldLandmarks && result.worldLandmarks[0];
-    if (landmarks) {
-      if (firstPoseAt == null) firstPoseAt = Date.now();
-      if (appMode === "align") runAlignment(landmarks);
-      else if (EXERCISES[currentExercise].type === "angle") runAngleExercise(landmarks, worldLandmarks);
-      else runFootworkExercise(landmarks);
+  const longSegLen = (playL - 2 * cornerGap - sideGap) / 2;
+  const longCushionGeo = new THREE.BoxGeometry(cushionDepth, cushionHeight, longSegLen);
+  const longSegCenterOffset = sideGap / 2 + longSegLen / 2;
+  for (const xSide of [-1, 1]) {
+    for (const zSide of [-1, 1]) {
+      const cushion = new THREE.Mesh(longCushionGeo, MAT_CUSHION);
+      cushion.position.set(xSide * (playW / 2 - cushionDepth / 2), cushionY, zSide * longSegCenterOffset);
+      group.add(cushion);
     }
   }
-  rafId = requestAnimationFrame(renderLoop);
+
+  // --- Angled cushion "noses" bridging each cushion end into its neighboring pocket mouth ---
+  // Real tables taper the cushion toward the pocket rather than a blunt perpendicular cut;
+  // this closes the visual gap/overlap you saw at the corners and side pockets.
+  function addPocketNoses(pocketX, pocketZ, endpoints) {
+    for (const ep of endpoints) {
+      const dx = pocketX - ep.x, dz = pocketZ - ep.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < 0.001) continue;
+      const dirX = dx / dist, dirZ = dz / dist;
+      const noseLen = Math.max(dist - pocketRadius * 0.85, 0.01);
+      const midX = ep.x + dirX * noseLen / 2;
+      const midZ = ep.z + dirZ * noseLen / 2;
+      const angle = Math.atan2(dirZ, dirX);
+      const nose = new THREE.Mesh(
+        new THREE.BoxGeometry(noseLen, cushionHeight, cushionDepth * 0.8),
+        MAT_CUSHION
+      );
+      nose.position.set(midX, cushionY, midZ);
+      nose.rotation.y = -angle;
+      group.add(nose);
+    }
+  }
+
+  for (const xSide of [-1, 1]) {
+    for (const zSide of [-1, 1]) {
+      const pocketX = xSide * playW / 2, pocketZ = zSide * playL / 2;
+      const shortEnd = { x: xSide * shortSegLen / 2, z: zSide * (playL / 2 - cushionDepth / 2) };
+      const longEnd = { x: xSide * (playW / 2 - cushionDepth / 2), z: zSide * (longSegCenterOffset + longSegLen / 2) };
+      addPocketNoses(pocketX, pocketZ, [shortEnd, longEnd]);
+    }
+  }
+  for (const xSide of [-1, 1]) {
+    const pocketX = xSide * playW / 2, pocketZ = 0;
+    const end1 = { x: xSide * (playW / 2 - cushionDepth / 2), z: longSegCenterOffset - longSegLen / 2 };
+    const end2 = { x: xSide * (playW / 2 - cushionDepth / 2), z: -(longSegCenterOffset - longSegLen / 2) };
+    addPocketNoses(pocketX, pocketZ, [end1, end2]);
+  }
+
+  const headString = new THREE.Mesh(new THREE.PlaneGeometry(playW, 0.004).rotateX(-Math.PI / 2), MAT_LINE);
+  headString.position.set(0, feltY + 0.003, playL / 4);
+  group.add(headString);
+
+  const footSpot = new THREE.Mesh(new THREE.CircleGeometry(0.006, 16).rotateX(-Math.PI / 2), MAT_LINE);
+  footSpot.position.set(0, feltY + 0.003, -playL / 4);
+  group.add(footSpot);
+
+  const cueBallMesh = new THREE.Mesh(new THREE.SphereGeometry(BALL_RADIUS, 24, 24), MAT_CUEBALL);
+  cueBallMesh.position.set(0, feltY + BALL_RADIUS, playL / 4);
+  group.add(cueBallMesh);
+
+  // --- Object ball rack: standard 15-ball triangle, apex at the foot spot,
+  //     8-ball fixed at the true center, everything else shuffled around it. ---
+  const d = BALL_RADIUS * 2;
+  const rowSpacing = d * Math.sqrt(3) / 2;
+  const apexZ = -playL / 4;
+  const rackSlots = [];
+  for (let row = 0; row < 5; row++) {
+    for (let k = 0; k <= row; k++) {
+      rackSlots.push({ x: (k - row / 2) * d, z: apexZ - row * rowSpacing });
+    }
+  }
+  const CENTER_SLOT_INDEX = 4; // middle ball of the 3rd row — traditional 8-ball position
+
+  const remaining = BALL_DATA.filter((b) => b.type !== 'eight');
+  for (let i = remaining.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [remaining[i], remaining[j]] = [remaining[j], remaining[i]];
+  }
+
+  const objectBalls = [];
+  let ri = 0;
+  for (let i = 0; i < rackSlots.length; i++) {
+    const data = (i === CENTER_SLOT_INDEX) ? BALL_DATA.find((b) => b.type === 'eight') : remaining[ri++];
+    const mat = data.type === 'stripe' ? makeStripeMaterial(data.color) : makeSolidMaterial(data.color);
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(BALL_RADIUS, 24, 24), mat);
+    mesh.position.set(rackSlots[i].x, feltY + BALL_RADIUS, rackSlots[i].z);
+    group.add(mesh);
+    objectBalls.push({ mesh, number: data.num, type: data.type });
+  }
+
+  return { group, playW, playL, feltY, pocketPositions, pocketRadius, cueBallMesh, objectBalls };
 }
 
-// ============================================================
-// UI plumbing
-// ============================================================
-function setPhaseChip(text, tone) {
-  const chip = document.getElementById("phaseChip");
-  chip.textContent = text;
-  chip.style.color = tone === "good" ? "var(--good)" : tone === "warn" ? "var(--warn)" : "var(--muted)";
-}
-function showAlert(msg, tone) {
-  const bar = document.getElementById("alertBar");
-  bar.textContent = msg;
-  bar.className = "alert-bar show " + tone;
-}
-function hideAlert() { document.getElementById("alertBar").classList.remove("show"); }
+// ============================================================================
+// Cue stick viewmodel — a small 3D cue model attached to the camera itself
+// (like a first-person weapon model), so the framing always reads as
+// "sighting down a cue" regardless of exactly how high the phone is held.
+// The AR camera's real position/rotation can't be overridden (see notes
+// elsewhere), so this is the practical way to get that visual language —
+// physically lowering the phone near table height still helps, but this
+// means the shot doesn't *require* a perfect crouch to look right.
+// ============================================================================
+function buildCueStickViewmodel() {
+  cueStickGroup = new THREE.Group();
 
-function renderTabs() {
-  const wrap = document.getElementById("exTabs");
-  wrap.innerHTML = "";
-  Object.entries(EXERCISES).forEach(([key, cfg]) => {
-    const btn = document.createElement("div");
-    btn.className = "ex-tab" + (key === currentExercise ? " active" : "");
-    btn.textContent = cfg.label;
-    btn.addEventListener("click", () => switchExercise(key));
-    wrap.appendChild(btn);
-  });
-}
+  const shaftMat = new THREE.MeshStandardMaterial({ color: 0xc9a06a, roughness: 0.5 });
+  const tipMat = new THREE.MeshStandardMaterial({ color: 0x2a6fb0, roughness: 0.6 }); // chalked tip
+  const buttMat = new THREE.MeshStandardMaterial({ color: 0x2b1a10, roughness: 0.6 });
 
-function renderRules() {
-  const cfg = EXERCISES[currentExercise];
-  document.getElementById("rulesTitle").textContent = "Technique rules — " + cfg.label.toLowerCase();
-  document.getElementById("angleLab").textContent = cfg.type === "angle" ? cfg.angleLabel : "Foot spread";
-  const grid = document.getElementById("rulesGrid");
-  grid.innerHTML = "";
-  cfg.rules.forEach(([k, v]) => {
-    const row = document.createElement("div");
-    row.className = "rule";
-    row.innerHTML = `<span>${k}</span><span class="ok">${v}</span>`;
-    grid.appendChild(row);
-  });
-  document.getElementById("startCopy").textContent = cfg.startCopy;
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.013, 1.1, 12), shaftMat);
+  const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.012, 12), tipMat);
+  const butt = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.016, 0.09, 12), buttMat);
+
+  // Cylinder axis defaults to Y; lay the stick along its own -Y so "tip" is at the
+  // group's local origin (near the ball) and "butt" trails back toward the player.
+  shaft.position.y = -0.55;
+  tip.position.y = -1.106;
+  butt.position.y = 0.045;
+
+  cueStickGroup.add(shaft, tip, butt);
+
+  // Orient + place relative to the camera: bottom-right of frame, angled in toward
+  // screen center, tip pointing forward — this is what reads as "down the cue."
+  cueStickGroup.position.set(0.10, -0.20, cueStickBaseZ);
+  cueStickGroup.rotation.set(-1.05, 0.22, 0.18);
+  cueStickGroup.visible = false;
+
+  camera.add(cueStickGroup);
 }
 
-function switchExercise(key) {
-  currentExercise = key;
-  document.getElementById("subLabel").textContent = EXERCISES[key].sub;
-  appMode = "align";
-  alignStartTime = null;
-  phase = "standby";
-  stepIndex = 0;
-  stepHoldStart = null;
-  smoothedAngle = null;
-  smoothedSpread = null;
-  renderTabs();
-  renderRules();
-  hideAlert();
+/** Slides the viewmodel along its own aim axis to mirror the real pull-back/swing motion. */
+function updateCueStickVisual() {
+  if (!cueStickGroup) return;
+  let offset = 0;
+  if (strokeArmState === 'BACKSWING') {
+    offset = Math.min(0.07, strokeArmTimer * 0.12);       // pulls the tip away from the ball
+  } else if (strokeArmState === 'STROKE') {
+    offset = -Math.min(0.05, (peakForwardSpeed / MAX_EXPECTED_SPEED) * 0.05); // pushes tip toward the ball
+  }
+  cueStickGroup.position.z = cueStickBaseZ + offset;
 }
 
-function setControlsEnabled(on) {
-  document.getElementById("resetBtn").disabled = !on;
-  document.getElementById("realignBtn").disabled = !on;
-  document.getElementById("endBtn").disabled = !on;
+// ============================================================================
+// Cue Mode state machine
+// ============================================================================
+function getDownwardPitchAngle(cam) {
+  const forward = new THREE.Vector3();
+  cam.getWorldDirection(forward);
+  const angleFromStraightDown = forward.angleTo(new THREE.Vector3(0, -1, 0)) * (180 / Math.PI);
+  return 90 - angleFromStraightDown;
 }
 
-async function startCamera() {
-  if (navigator.permissions && navigator.permissions.query) {
-    try {
-      const status = await navigator.permissions.query({ name: "camera" });
-      if (status.state === "denied") {
-        showAlert("Camera access is blocked for this page. Check site permissions and reload.", "bad");
-        return false;
+function updateCueModeStateMachine() {
+  if (appState === 'SHOT' || !tableInfo) return;
+
+  const pitch = getDownwardPitchAngle(camera);
+  const dist = camera.position.distanceTo(tableInfo.group.position);
+  const nearTable = dist <= MAX_TABLE_DIST;
+
+  if (appState === 'FREE_LOOK') {
+    if (pitch >= ENTER_CUE_ANGLE && nearTable) enterCueMode();
+  } else if (appState === 'CUE_MODE') {
+    if (pitch < EXIT_CUE_ANGLE || !nearTable) exitCueMode();
+  }
+}
+
+function enterCueMode() {
+  appState = 'CUE_MODE';
+  cueModeUIEl.style.display = 'flex';
+  aimLine.visible = true;
+  crosshairEl.style.display = 'block';
+  if (cueStickGroup) cueStickGroup.visible = true;
+  strokeArmState = 'IDLE';
+  peakForwardSpeed = 0;
+  armedForStrike = false;
+  strikeBtn.disabled = false;
+  strikeBtn.textContent = 'Ready to Strike';
+  hintEl.textContent = 'Cue Mode — aim, then tap "Ready to Strike" before you swing.';
+}
+
+function exitCueMode() {
+  appState = 'FREE_LOOK';
+  cueModeUIEl.style.display = 'none';
+  aimLine.visible = false;
+  crosshairEl.style.display = 'none';
+  if (cueStickGroup) cueStickGroup.visible = false;
+  hideGhostBall();
+  strokeArmState = 'IDLE';
+  armedForStrike = false;
+  hintEl.textContent = 'Tilt the phone down toward the table to aim.';
+}
+
+// ============================================================================
+// Stroke detector — gated by the "Ready to Strike" button so a shot only
+// counts once the player has explicitly signaled intent, not on any swing
+// that happens to occur while just looking around in Cue Mode.
+// ============================================================================
+function updateStrokeDetector(dt) {
+  const forward = new THREE.Vector3();
+  camera.getWorldDirection(forward);
+  forward.y = 0;
+  if (forward.lengthSq() < 0.0001) return;
+  forward.normalize();
+  lastAimForward.copy(forward);
+
+  updateAimLine(forward);
+  updateCueStickVisual();
+
+  if (!armedForStrike) return;
+
+  const forwardSpeed = camVelocity.dot(forward);
+
+  switch (strokeArmState) {
+    case 'IDLE':
+      if (forwardSpeed <= BACKSWING_THRESHOLD) {
+        strokeArmState = 'BACKSWING';
+        strokeArmTimer = 0;
       }
-    } catch (e) { /* not supported everywhere — non-fatal */ }
+      break;
+    case 'BACKSWING':
+      strokeArmTimer += dt;
+      if (strokeArmTimer > ARM_WINDOW_SECONDS) {
+        strokeArmState = 'IDLE';
+        break;
+      }
+      if (forwardSpeed >= STROKE_THRESHOLD) {
+        strokeArmState = 'STROKE';
+        peakForwardSpeed = forwardSpeed;
+      }
+      break;
+    case 'STROKE':
+      peakForwardSpeed = Math.max(peakForwardSpeed, forwardSpeed);
+      if (forwardSpeed <= DECEL_THRESHOLD) {
+        commitStroke(forward, peakForwardSpeed);
+        strokeArmState = 'IDLE';
+      }
+      break;
   }
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: 480, height: 640 }, audio: false });
-    video = document.createElement("video");
-    video.srcObject = stream;
-    video.playsInline = true;
-    video.muted = true;
-    await video.play();
-    return true;
-  } catch (e) {
-    showAlert("Couldn't access the camera — check permissions, or open this file directly instead of in a preview.", "bad");
-    return false;
-  }
+
+  powerFillEl.style.width = `${Math.max(0, Math.min(1, peakForwardSpeed / MAX_EXPECTED_SPEED)) * 100}%`;
 }
 
-function armWatchdog() {
-  clearTimeout(watchdogTimer);
-  watchdogTimer = setTimeout(() => {
-    if (workoutActive && firstPoseAt == null) {
-      showAlert("No pose detected yet. Confirm MODEL: READY is showing, make sure you're well-lit and fully in frame, and check camera permission.", "bad");
-    }
-  }, 15000);
+function commitStroke(worldDirection, peakSpeed) {
+  if (!cueBallRef || !cueBallRef.active || !tableInfo) return;
+
+  const invQuat = tableInfo.group.quaternion.clone().invert();
+  const localDir = worldDirection.clone().applyQuaternion(invQuat);
+  localDir.y = 0;
+  if (localDir.lengthSq() < 0.0001) return;
+  localDir.normalize();
+
+  const power = Math.min(1, peakSpeed / MAX_EXPECTED_SPEED);
+  const speed = power * MAX_BALL_SPEED;
+  cueBallRef.vel.set(localDir.x * speed, 0, localDir.z * speed);
+
+  peakForwardSpeed = 0;
+  armedForStrike = false;
+  appState = 'SHOT';
+  cueModeUIEl.style.display = 'none';
+  aimLine.visible = false;
+  crosshairEl.style.display = 'none';
+  if (cueStickGroup) {
+    cueStickGroup.visible = false;
+    cueStickGroup.position.z = cueStickBaseZ;
+  }
+  hideGhostBall();
+  hintEl.textContent = '';
 }
 
-async function initModel() {
-  const filesetResolver = await FilesetResolver.forVisionTasks(
-    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+/**
+ * Traces the cue ball's straight-line path in the table's local X/Z plane and
+ * finds the first thing it would touch — another ball (via true circle-sweep,
+ * so thin cut shots are handled correctly, not just a center-to-center ray)
+ * or a cushion. This is the same "ghost ball" geometry real players use to
+ * aim cut shots: the predicted contact point IS where the cue ball's center
+ * sits at the moment of impact.
+ */
+function traceCuePath(worldForward) {
+  const invQuat = tableInfo.group.quaternion.clone().invert();
+  const localDir = worldForward.clone().applyQuaternion(invQuat);
+  localDir.y = 0;
+  if (localDir.lengthSq() < 0.0001) localDir.set(0, 0, -1);
+  else localDir.normalize();
+
+  const origin = cueBallRef.pos; // table-local x/z
+  const R = BALL_RADIUS * 2;     // cue ball surface touches object ball surface at this center distance
+
+  let bestBallT = Infinity;
+  let bestBall = null;
+  for (const ball of balls) {
+    if (ball === cueBallRef || !ball.active) continue;
+    const ocx = origin.x - ball.pos.x, ocz = origin.z - ball.pos.z;
+    const b = 2 * (ocx * localDir.x + ocz * localDir.z);
+    const c = ocx * ocx + ocz * ocz - R * R;
+    const disc = b * b - 4 * c;
+    if (disc < 0) continue;
+    const t = (-b - Math.sqrt(disc)) / 2;
+    if (t > 0.001 && t < bestBallT) { bestBallT = t; bestBall = ball; }
+  }
+
+  const halfW = tableInfo.playW / 2 - BALL_RADIUS;
+  const halfL = tableInfo.playL / 2 - BALL_RADIUS;
+  let cushionT = Infinity;
+  if (localDir.x > 1e-4) cushionT = Math.min(cushionT, (halfW - origin.x) / localDir.x);
+  if (localDir.x < -1e-4) cushionT = Math.min(cushionT, (-halfW - origin.x) / localDir.x);
+  if (localDir.z > 1e-4) cushionT = Math.min(cushionT, (halfL - origin.z) / localDir.z);
+  if (localDir.z < -1e-4) cushionT = Math.min(cushionT, (-halfL - origin.z) / localDir.z);
+  if (cushionT < 0) cushionT = Infinity;
+
+  let finalT, hitBall;
+  if (bestBallT <= cushionT) { finalT = Math.min(bestBallT, 3); hitBall = bestBall; }
+  else { finalT = Math.min(cushionT, 3); hitBall = null; }
+
+  const localHit = new THREE.Vector3(
+    origin.x + localDir.x * finalT,
+    tableInfo.feltY + BALL_RADIUS,
+    origin.z + localDir.z * finalT
   );
-  poseLandmarker = await PoseLandmarker.createFromOptions(filesetResolver, {
-    baseOptions: {
-      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task",
-      delegate: "GPU"
-    },
-    runningMode: "VIDEO",
-    numPoses: 1
-  });
-  modelReady = true;
-  document.getElementById("modelStatus").textContent = "MODEL: READY";
+  return { hitPoint: tableInfo.group.localToWorld(localHit), hitBall };
 }
 
-window.addEventListener("load", () => {
-  canvas = document.getElementById("cnv");
-  ctx = canvas.getContext("2d");
-  fitCanvas();
-  window.addEventListener("resize", fitCanvas);
+function hideGhostBall() {
+  ghostBallMesh.visible = false;
+  ghostTrajLine.visible = false;
+}
 
-  renderTabs();
-  renderRules();
-  initModel().catch(() => {
-    document.getElementById("modelStatus").textContent = "MODEL: FAILED";
-    showAlert("Model failed to load — check your connection and reload.", "bad");
-  });
+function updateAimLine(worldForward) {
+  if (!cueBallRef || !cueBallRef.active || !tableInfo) return;
+  const ballWorldPos = new THREE.Vector3();
+  cueBallRef.mesh.getWorldPosition(ballWorldPos);
 
-  document.getElementById("startBtn").addEventListener("click", async () => {
-    document.getElementById("startBtn").disabled = true;
-    document.getElementById("startBtn").textContent = "Starting…";
-    const ok = await startCamera();
-    if (!ok) { document.getElementById("startBtn").disabled = false; document.getElementById("startBtn").textContent = "Start camera"; return; }
-    document.getElementById("startOverlay").classList.add("hide");
-    workoutActive = true;
-    firstPoseAt = null;
-    appMode = "align";
-    alignStartTime = null;
-    setControlsEnabled(true);
-    fitCanvas();
-    armWatchdog();
-    renderLoop();
-  });
+  const trace = traceCuePath(worldForward);
 
-  document.getElementById("resetBtn").addEventListener("click", () => {
-    repCount = 0;
-    document.getElementById("repCount").textContent = "0";
-    document.getElementById("log").innerHTML = "";
-    phase = "standby";
-    stepIndex = 0;
-    smoothedAngle = null;
-    smoothedSpread = null;
-  });
+  const posAttr = aimLine.geometry.attributes.position;
+  posAttr.setXYZ(0, ballWorldPos.x, ballWorldPos.y, ballWorldPos.z);
+  posAttr.setXYZ(1, trace.hitPoint.x, trace.hitPoint.y, trace.hitPoint.z);
+  posAttr.needsUpdate = true;
 
-  document.getElementById("realignBtn").addEventListener("click", () => {
-    appMode = "align";
-    alignStartTime = null;
-    hideAlert();
-  });
+  if (trace.hitBall) {
+    ghostBallMesh.position.copy(trace.hitPoint);
+    ghostBallMesh.visible = true;
 
-  document.getElementById("endBtn").addEventListener("click", () => {
-    workoutActive = false;
-    cancelAnimationFrame(rafId);
-    if (video && video.srcObject) video.srcObject.getTracks().forEach((t) => t.stop());
-    document.getElementById("startOverlay").classList.remove("hide");
-    document.getElementById("startBtn").disabled = false;
-    document.getElementById("startBtn").textContent = "Start camera";
-    setControlsEnabled(false);
-  });
-});
+    // Predicted object-ball direction: straight out along the line from the
+    // ghost ball's center through the real object ball's center (the
+    // standard stun-shot approximation — ignores english/spin for now).
+    const objWorldPos = new THREE.Vector3();
+    trace.hitBall.mesh.getWorldPosition(objWorldPos);
+    const objDir = objWorldPos.clone().sub(trace.hitPoint).normalize();
+    const objEnd = objWorldPos.clone().addScaledVector(objDir, 0.16);
+
+    const tPosAttr = ghostTrajLine.geometry.attributes.position;
+    tPosAttr.setXYZ(0, objWorldPos.x, objWorldPos.y, objWorldPos.z);
+    tPosAttr.setXYZ(1, objEnd.x, objEnd.y, objEnd.z);
+    tPosAttr.needsUpdate = true;
+    ghostTrajLine.visible = true;
+  } else {
+    hideGhostBall();
+  }
+}
+
+// ============================================================================
+// Ball physics: friction + cushion bounce + pocket capture + ball-to-ball
+// collision, all in the table's local X/Z plane.
+// ============================================================================
+function resolveBallCollision(a, b) {
+  const dx = a.pos.x - b.pos.x, dz = a.pos.z - b.pos.z;
+  const distSq = dx * dx + dz * dz;
+  const minDist = BALL_RADIUS * 2;
+  if (distSq >= minDist * minDist || distSq < 1e-9) return;
+
+  const dist = Math.sqrt(distSq);
+  const nx = dx / dist, nz = dz / dist;
+  const overlap = minDist - dist;
+  a.pos.x += nx * overlap * 0.5; a.pos.z += nz * overlap * 0.5;
+  b.pos.x -= nx * overlap * 0.5; b.pos.z -= nz * overlap * 0.5;
+
+  const relVel = (a.vel.x - b.vel.x) * nx + (a.vel.z - b.vel.z) * nz;
+  if (relVel < 0) {
+    const impulse = -relVel * COLLISION_RESTITUTION;
+    a.vel.x += nx * impulse; a.vel.z += nz * impulse;
+    b.vel.x -= nx * impulse; b.vel.z -= nz * impulse;
+  }
+
+  a.mesh.position.set(a.pos.x, a.mesh.position.y, a.pos.z);
+  b.mesh.position.set(b.pos.x, b.mesh.position.y, b.pos.z);
+}
+
+function updateBallPhysics(dt) {
+  if (!tableInfo || dt <= 0) return;
+  const { playW, playL, feltY, pocketPositions, pocketRadius } = tableInfo;
+  let anyMoving = false;
+
+  for (const ball of balls) {
+    if (!ball.active) continue;
+    const speed = ball.vel.length();
+    if (speed <= 0.0001) continue;
+
+    anyMoving = true;
+    const newSpeed = Math.max(0, speed - FRICTION_DECEL * dt);
+    ball.vel.multiplyScalar(newSpeed / speed);
+    ball.pos.addScaledVector(ball.vel, dt);
+
+    let captured = false;
+    for (const [px, pz] of pocketPositions) {
+      const dx = ball.pos.x - px, dz = ball.pos.z - pz;
+      if (dx * dx + dz * dz < pocketRadius * pocketRadius) {
+        ball.active = false;
+        ball.mesh.visible = false;
+        captured = true;
+        break;
+      }
+    }
+    if (captured) continue;
+
+    const halfW = playW / 2 - BALL_RADIUS;
+    const halfL = playL / 2 - BALL_RADIUS;
+    if (ball.pos.x > halfW)  { ball.pos.x = halfW;  ball.vel.x *= -CUSHION_RESTITUTION; }
+    if (ball.pos.x < -halfW) { ball.pos.x = -halfW; ball.vel.x *= -CUSHION_RESTITUTION; }
+    if (ball.pos.z > halfL)  { ball.pos.z = halfL;  ball.vel.z *= -CUSHION_RESTITUTION; }
+    if (ball.pos.z < -halfL) { ball.pos.z = -halfL; ball.vel.z *= -CUSHION_RESTITUTION; }
+
+    ball.mesh.position.set(ball.pos.x, feltY + BALL_RADIUS, ball.pos.z);
+  }
+
+  for (let i = 0; i < balls.length; i++) {
+    if (!balls[i].active) continue;
+    for (let j = i + 1; j < balls.length; j++) {
+      if (!balls[j].active) continue;
+      resolveBallCollision(balls[i], balls[j]);
+    }
+  }
+
+  if (appState === 'SHOT' && !anyMoving) {
+    if (cueBallRef && !cueBallRef.active) {
+      // Scratch: only the CUE ball ever comes back — that's the "ball in hand" rule.
+      // Object balls that go in STAY in; that's how points are scored in real 8-ball.
+      cueBallRef.active = true;
+      cueBallRef.mesh.visible = true;
+      cueBallRef.pos.set(0, 0, tableInfo.playL / 4);
+      cueBallRef.vel.set(0, 0, 0);
+      cueBallRef.mesh.position.set(0, tableInfo.feltY + BALL_RADIUS, tableInfo.playL / 4);
+      hintEl.textContent = 'Scratch — cue ball respawned (ball in hand). Tilt down to aim.';
+    } else {
+      hintEl.textContent = 'Tilt the phone down toward the table to aim.';
+    }
+    appState = 'FREE_LOOK';
+  }
+}
+
+// ============================================================================
+// AR camera walking "through" the table — a fundamental limitation, not a bug:
+// a virtual object has no physical presence, so nothing can stop the player's
+// real body from occupying the same space. Best we can do is hide the table
+// and warn rather than render a broken clipped mess while they're inside it.
+// ============================================================================
+function updateTableOcclusionGuard() {
+  if (!tableInfo) return;
+  const localCam = tableInfo.group.worldToLocal(camera.position.clone());
+  const margin = 0.15;
+  const inside = Math.abs(localCam.x) < tableInfo.playW / 2 + 0.12 + margin &&
+                 Math.abs(localCam.z) < tableInfo.playL / 2 + 0.12 + margin &&
+                 localCam.y < 0.9 && localCam.y > -0.3;
+
+  if (inside && !insideTableWarning) {
+    insideTableWarning = true;
+    tableInfo.group.visible = false;
+    warnEl.style.display = 'block';
+  } else if (!inside && insideTableWarning) {
+    insideTableWarning = false;
+    tableInfo.group.visible = true;
+    warnEl.style.display = 'none';
+  }
+}
+
+// ============================================================================
+// Main loop
+// ============================================================================
+function onWindowResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function render(timestamp, frame) {
+  if (frame) {
+    const session = renderer.xr.getSession();
+    const referenceSpace = renderer.xr.getReferenceSpace();
+
+    if (!hitTestSourceRequested) {
+      session.requestReferenceSpace('viewer').then((viewerSpace) => {
+        session.requestHitTestSource({ space: viewerSpace }).then((source) => {
+          hitTestSource = source;
+        });
+      });
+      session.addEventListener('end', () => {
+        hitTestSourceRequested = false;
+        hitTestSource = null;
+        tablePlaced = false;
+        tableInfo = null;
+        balls = [];
+        cueBallRef = null;
+        prevCamPosInit = false;
+        insideTableWarning = false;
+      });
+      hitTestSourceRequested = true;
+    }
+
+    if (hitTestSource && !tablePlaced) {
+      const hitTestResults = frame.getHitTestResults(hitTestSource);
+      if (hitTestResults.length > 0) {
+        const pose = hitTestResults[0].getPose(referenceSpace);
+        reticle.visible = true;
+        reticle.matrix.fromArray(pose.transform.matrix);
+      } else {
+        reticle.visible = false;
+      }
+    }
+
+    const dt = lastTimestamp ? Math.min((timestamp - lastTimestamp) / 1000, 0.05) : 0;
+    lastTimestamp = timestamp;
+
+    if (tablePlaced) {
+      if (!prevCamPosInit) {
+        prevCamPos.copy(camera.position);
+        prevCamPosInit = true;
+      } else if (dt > 0) {
+        const instVel = new THREE.Vector3().subVectors(camera.position, prevCamPos).divideScalar(dt);
+        camVelocity.lerp(instVel, 0.35);
+        prevCamPos.copy(camera.position);
+      }
+
+      updateTableOcclusionGuard();
+      updateCueModeStateMachine();
+      if (appState === 'CUE_MODE') updateStrokeDetector(dt);
+      updateBallPhysics(dt);
+    }
+  }
+
+  renderer.render(scene, camera);
+}
 </script>
 </body>
 </html>
